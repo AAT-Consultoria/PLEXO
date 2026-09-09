@@ -1,6 +1,6 @@
 // ==UserScript==
-// @updateURL    https://github.com/AAT-Consultoria/PLEXO/raw/refs/heads/main/aat_rfx.user.js
-// @downloadURL  https://github.com/AAT-Consultoria/PLEXO/raw/refs/heads/main/aat_rfx.user.js
+// @updateURL    https://raw.githubusercontent.com/AAT-Consultoria/PLEXO/main/aat_rfx.user.js
+// @downloadURL  https://raw.githubusercontent.com/AAT-Consultoria/PLEXO/main/aat_rfx.user.js
 // @name         AAT · Gestionar RFx (Connected Supplier)
 // @namespace    https://aatconsultoria.com/
 // @version      19.0.1
