@@ -1,4 +1,6 @@
 // ==UserScript==
+// @updateURL    https://github.com/AAT-Consultoria/PLEXO/raw/refs/heads/main/aat_responses.user.js
+// @downloadURL  https://github.com/AAT-Consultoria/PLEXO/raw/refs/heads/main/aat_responses.user.js
 // @name         AAT · Listar respuestas (Connected Supplier)
 // @namespace    https://aatconsultoria.com/
 // @version      1.3.2
