@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PLEXO · Instalación</title>
+<style>
+  :root{
+    --azul:#003A5C; --azul-claro:#1668dc; --tinta:#16191d; --gris:#5a646e;
+    --linea:#e3e8ed; --fondo:#f5f7f9; --tarjeta:#fff;
+    --ok:#1e7d32; --ok-fondo:#eaf6ec; --aviso:#b26a00; --aviso-fondo:#fff6e8;
+    --error:#c0392b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fondo);color:var(--tinta);
+       font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+  .envoltorio{max-width:760px;margin:0 auto;padding:0 20px 64px}
+
+  header{background:var(--azul);color:#fff;padding:28px 0 24px;margin-bottom:28px}
+  header .envoltorio{padding-bottom:0}
+  header h1{margin:0 0 4px;font-size:26px;letter-spacing:.2px}
+  header p{margin:0;opacity:.8;font-size:15px}
+  header .marca{font-size:12px;letter-spacing:2px;opacity:.65;margin-bottom:10px}
+
+  .estado{background:var(--tarjeta);border:1px solid var(--linea);border-radius:10px;
+          padding:18px 20px;margin-bottom:26px}
+  .estado h2{margin:0 0 12px;font-size:14px;letter-spacing:.4px;color:var(--gris);
+             text-transform:uppercase}
+  .fila{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--linea)}
+  .fila:first-of-type{border-top:0}
+  .fila .nombre{flex:1;font-weight:600}
+  .pastilla{font-size:13px;font-weight:600;padding:4px 11px;border-radius:20px;white-space:nowrap}
+  .pastilla.no{background:#eef1f4;color:var(--gris)}
+  .pastilla.si{background:var(--ok-fondo);color:var(--ok)}
+  .estado .pie{margin:14px 0 0;font-size:13.5px;color:var(--gris)}
+  .estado .pie button{font:inherit;font-size:13.5px;font-weight:600;border:0;background:none;
+                      color:var(--azul-claro);cursor:pointer;padding:0;text-decoration:underline}
+
+  .paso{background:var(--tarjeta);border:1px solid var(--linea);border-radius:10px;
+        padding:22px 24px;margin-bottom:16px}
+  .paso.hecho{border-color:#bfe0c6;background:#fbfefb}
+  .cabeza{display:flex;align-items:baseline;gap:12px;margin-bottom:12px}
+  .num{flex:0 0 auto;width:28px;height:28px;border-radius:50%;background:var(--azul);
+       color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;
+       justify-content:center;align-self:flex-start}
+  .paso.hecho .num{background:var(--ok)}
+  .cabeza h3{margin:0;font-size:18px;flex:1}
+  .paso p{margin:0 0 12px}
+  .paso ol,.paso ul{margin:0 0 12px;padding-left:22px}
+  .paso li{margin-bottom:7px}
+  .tenue{color:var(--gris);font-size:14.5px}
+
+  .boton{display:inline-block;background:var(--azul-claro);color:#fff;border:0;border-radius:7px;
+         padding:11px 20px;font:inherit;font-weight:600;text-decoration:none;cursor:pointer}
+  .boton:hover{background:#0f56b8}
+  .boton.gris{background:#e6eaee;color:#22282e}
+  .boton.gris:hover{background:#d6dce2}
+  .acciones{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:6px}
+
+  .direccion{display:flex;gap:8px;align-items:stretch;margin:10px 0 14px}
+  .direccion code{flex:1;background:#f1f4f7;border:1px solid var(--linea);border-radius:7px;
+                  padding:11px 13px;font:14px ui-monospace,Consolas,monospace;
+                  overflow-x:auto;white-space:nowrap}
+
+  .nota{border-left:4px solid var(--aviso);background:var(--aviso-fondo);
+        padding:12px 15px;border-radius:0 7px 7px 0;margin:14px 0 0;font-size:15px}
+  .nota strong{color:var(--aviso)}
+
+  .marca-hecho{display:flex;align-items:center;gap:9px;margin-top:14px;
+               padding-top:13px;border-top:1px solid var(--linea);cursor:pointer;
+               font-size:15px;font-weight:600;color:var(--gris);user-select:none}
+  .marca-hecho input{width:19px;height:19px;cursor:pointer;accent-color:var(--ok)}
+  .paso.hecho .marca-hecho{color:var(--ok)}
+  .auto{font-size:13.5px;font-weight:500;color:var(--ok)}
+
+  details{background:var(--tarjeta);border:1px solid var(--linea);border-radius:10px;
+          padding:16px 22px;margin-top:26px}
+  details summary{font-weight:600;cursor:pointer;font-size:16px}
+  details h4{margin:20px 0 6px;font-size:15.5px;color:var(--error)}
+  details p{margin:0 0 8px;font-size:15px}
+
+  footer{margin-top:32px;padding-top:18px;border-top:1px solid var(--linea);
+         font-size:13.5px;color:var(--gris);text-align:center}
+
+  @media (max-width:560px){
+    .envoltorio{padding:0 14px 48px}
+    .paso{padding:18px 16px}
+    header h1{font-size:22px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="envoltorio">
+    <div class="marca">A A T &nbsp;·&nbsp; P L E X O</div>
+    <h1>Instalar las herramientas de Connected Supplier</h1>
+    <p>Cuatro pasos. Unos dos minutos. Se hace una sola vez.</p>
+  </div>
+</header>
+
+<div class="envoltorio">
+
+  <section class="estado">
+    <h2>Qué tienes instalado ahora mismo</h2>
+    <div class="fila">
+      <span class="nombre">Gestionar RFx</span>
+      <span class="pastilla no" id="est-rfx">no detectada</span>
+    </div>
+    <div class="fila">
+      <span class="nombre">Listar respuestas</span>
+      <span class="pastilla no" id="est-resp">no detectada</span>
+    </div>
+    <p class="pie">
+      Esta comprobación es real: cada herramienta se anuncia sola al cargarse esta página.
+      Si acabas de instalar una y sigue en gris,
+      <button type="button" onclick="location.reload()">recarga la página</button>.
+    </p>
+  </section>
+
+  <!-- PASO 1 -->
+  <section class="paso" id="paso1">
+    <div class="cabeza"><div class="num">1</div><h3>Instalar Tampermonkey</h3></div>
+    <p>Es la extensión de Chrome que se encarga de cargar las herramientas cada vez que entras
+       en Connected Supplier. Sin ella no funciona nada de lo demás.</p>
+    <div class="acciones">
+      <a class="boton" href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank" rel="noopener">Abrir la tienda de Chrome</a>
+    </div>
+    <ul class="tenue" style="margin-top:12px">
+      <li>Pulsa <strong>Añadir a Chrome</strong> y confirma con <strong>Añadir extensión</strong>.</li>
+      <li>Si el botón pone <strong>Quitar de Chrome</strong>, ya la tienes. No toques nada.</li>
+    </ul>
+    <div class="nota">
+      <strong>Si no te deja instalarla:</strong> para aquí y avisa a AAT. Puede que la empresa
+      tenga restringidas las extensiones. No es culpa tuya y no hay forma de saltárselo.
+    </div>
+    <label class="marca-hecho"><input type="checkbox" data-paso="1"> Ya lo he hecho</label>
+  </section>
+
+  <!-- PASO 2 -->
+  <section class="paso" id="paso2">
+    <div class="cabeza"><div class="num">2</div><h3>Dar permiso a Tampermonkey</h3></div>
+    <p>Chrome no deja que una extensión ejecute scripts hasta que se lo autorizas.
+       <strong>Sin este paso no aparecerá ningún botón</strong>, y no da ningún error: simplemente
+       no pasa nada. Es el paso donde se atasca todo el mundo.</p>
+
+    <p class="tenue">Chrome no permite que una página abra su propia configuración, así que esta
+       dirección hay que pegarla a mano:</p>
+    <div class="direccion">
+      <code id="url-ext">chrome://extensions/?id=dhdgffkkebhmkfjojejmpbldmpobfkfo</code>
+      <button class="boton" id="btn-copiar" type="button">Copiar</button>
+    </div>
+    <p class="tenue">Pégala en la barra de direcciones de Chrome (Ctrl+V) y pulsa Intro.
+       En esa página busca y activa:</p>
+    <ol>
+      <li><strong>Permitir secuencias de comandos de usuario</strong><br>
+          <span class="tenue">En inglés: «Allow user scripts». Es el imprescindible.</span></li>
+      <li><strong>Fijar en la barra de herramientas</strong><br>
+          <span class="tenue">Para tener el icono de Tampermonkey siempre a la vista. Es donde se
+          comprueba si las herramientas están activas el día que algo falle. Si no lo ves en esa
+          página, se hace desde el icono de la pieza de puzle de la barra de Chrome.</span></li>
+    </ol>
+    <div class="nota">
+      <strong>Si el interruptor no aparece, o aparece pero no se deja activar:</strong> para aquí
+      y avisa a AAT. Suele ser una política de la empresa.<br>
+      <span class="tenue">Si tu Chrome es antiguo y no ves ese interruptor por ningún lado, ve a
+      <code>chrome://extensions</code> y activa arriba a la derecha el «Modo de desarrollador».</span>
+    </div>
+    <label class="marca-hecho"><input type="checkbox" data-paso="2"> Ya lo he hecho</label>
+  </section>
+
+  <!-- PASO 3 -->
+  <section class="paso" id="paso3">
+    <div class="cabeza"><div class="num">3</div><h3>Instalar «Gestionar RFx»</h3></div>
+    <p>Al pulsar el botón se abre la pantalla de instalación de Tampermonkey, con el código a la
+       vista. Ahí solo tienes que pulsar el botón verde <strong>Instalar</strong>.</p>
+    <p class="tenue">Si en lugar de «Instalar» pone «Reinstalar», es que ya lo tenías: púlsalo
+       igualmente, se queda con la versión buena.</p>
+    <div class="acciones">
+      <a class="boton" id="enlace-rfx" href="https://raw.githubusercontent.com/AAT-Consultoria/PLEXO/main/aat_rfx.user.js" target="_blank" rel="noopener">Instalar Gestionar RFx</a>
+      <span class="auto" id="auto-rfx" hidden>Detectada, este paso ya está</span>
+    </div>
+    <div class="nota">
+      <strong>Si en vez del código sale un error, una página en blanco o un aviso del proxy:</strong>
+      este equipo no llega a GitHub. Para y avisa a AAT.
+    </div>
+    <label class="marca-hecho"><input type="checkbox" data-paso="3"> Ya lo he hecho</label>
+  </section>
+
+  <!-- PASO 4 -->
+  <section class="paso" id="paso4">
+    <div class="cabeza"><div class="num">4</div><h3>Instalar «Listar respuestas»</h3></div>
+    <p>La segunda herramienta. Ésta <strong>solo lee</strong>: saca a Excel las respuestas enviadas
+       de un periodo. No acepta nada ni cambia nada en el portal.</p>
+    <div class="acciones">
+      <a class="boton" id="enlace-resp" href="https://raw.githubusercontent.com/AAT-Consultoria/PLEXO/main/aat_responses.user.js" target="_blank" rel="noopener">Instalar Listar respuestas</a>
+      <span class="auto" id="auto-resp" hidden>Detectada, este paso ya está</span>
+    </div>
+    <label class="marca-hecho"><input type="checkbox" data-paso="4"> Ya lo he hecho</label>
+  </section>
+
+  <!-- COMPROBACION -->
+  <section class="paso" id="paso5">
+    <div class="cabeza"><div class="num">✓</div><h3>Comprobar que funciona</h3></div>
+    <p>Entra en Connected Supplier, ve a la pantalla de <strong>Open Requests</strong> y espera a
+       que cargue del todo. Abajo a la derecha tienen que aparecer dos botones con el logo de AAT:
+       <strong>Gestionar RFx</strong> y <strong>Listar respuestas</strong>.</p>
+    <p class="tenue">Si acabas de instalar y no aparecen, recarga esa página con <strong>Ctrl+F5</strong>.</p>
+    <div class="acciones">
+      <a class="boton gris" href="https://appcodeplatform.ericsson.net/ConnectedSupplier/" target="_blank" rel="noopener">Abrir Connected Supplier</a>
+    </div>
+  </section>
+
+  <details>
+    <summary>Si algo no ha salido</summary>
+
+    <h4>No aparece ningún botón en el portal</h4>
+    <p>Casi siempre es el permiso del paso 2. Vuelve a mirarlo y después recarga el portal con
+       Ctrl+F5. Si el estado de arriba en esta página dice que las herramientas están instaladas,
+       el problema es ése y no otro.</p>
+
+    <h4>Aparece solo uno de los dos botones</h4>
+    <p>Abre el panel de Tampermonkey desde su icono en la barra de Chrome y comprueba que los dos
+       scripts están activados, en verde. Si uno está en gris, púlsalo.</p>
+
+    <h4>No pude instalar la extensión, o el permiso no se dejaba activar</h4>
+    <p>Es una restricción de la empresa, no un fallo. Avisa a AAT contando qué te salió en pantalla;
+       hay que hablarlo con sistemas.</p>
+
+    <h4>Al abrir el script salió un error o un aviso del proxy</h4>
+    <p>Ese equipo no llega a GitHub. Avisa a AAT: hay que buscar otro sitio desde el que repartir
+       las herramientas.</p>
+
+    <h4>Qué mandar para que puedan ayudarte</h4>
+    <p>En qué paso te quedaste, qué te salió exactamente en pantalla, y una captura si puedes.
+       Con eso se arregla; sin eso, se adivina.</p>
+  </details>
+
+  <footer>
+    AAT Consultoría de Proyectos, S.L. · Uso interno<br>
+    ¿Dudas? El manual completo está en la carpeta de la herramienta.
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  // --- Comprobacion real: cada userscript pone su version en el <html> ---
+  function mirar(){
+    var v = {
+      rfx:  document.documentElement.getAttribute('data-aat-rfx'),
+      resp: document.documentElement.getAttribute('data-aat-resp')
+    };
+    pintar('est-rfx',  'auto-rfx',  'paso3', v.rfx);
+    pintar('est-resp', 'auto-resp', 'paso4', v.resp);
+  }
+
+  function pintar(idPastilla, idAviso, idPaso, version){
+    var p = document.getElementById(idPastilla);
+    if (version){
+      p.textContent = 'instalada · v' + version;
+      p.className = 'pastilla si';
+      document.getElementById(idAviso).hidden = false;
+      var caja = document.getElementById(idPaso).querySelector('input[type=checkbox]');
+      if (!caja.checked){ caja.checked = true; caja.dispatchEvent(new Event('change')); }
+    } else {
+      p.textContent = 'no detectada';
+      p.className = 'pastilla no';
+    }
+  }
+
+  mirar();
+  setInterval(mirar, 500);
+
+  // --- Marcar pasos como hechos (solo en memoria, no se guarda nada) ---
+  document.querySelectorAll('.marca-hecho input').forEach(function(caja){
+    caja.addEventListener('change', function(){
+      caja.closest('.paso').classList.toggle('hecho', caja.checked);
+    });
+  });
+
+  // --- Copiar la direccion de chrome://extensions ---
+  var btn = document.getElementById('btn-copiar');
+  btn.addEventListener('click', function(){
+    var texto = document.getElementById('url-ext').textContent.trim();
+    var listo = function(){
+      btn.textContent = 'Copiada';
+      setTimeout(function(){ btn.textContent = 'Copiar'; }, 2000);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(texto).then(listo, respaldo);
+    } else { respaldo(); }
+
+    // Si el navegador no deja usar el portapapeles (pasa al abrir el fichero
+    // en local), se selecciona el texto para que se pueda copiar a mano.
+    function respaldo(){
+      try {
+        var r = document.createRange();
+        r.selectNodeContents(document.getElementById('url-ext'));
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        btn.textContent = 'Pulsa Ctrl+C';
+        setTimeout(function(){ btn.textContent = 'Copiar'; }, 3000);
+      } catch(e){}
+    }
+  });
+})();
+</script>
+
+</body>
+</html>

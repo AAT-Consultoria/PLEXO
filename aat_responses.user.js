@@ -3,10 +3,11 @@
 // @downloadURL  https://raw.githubusercontent.com/AAT-Consultoria/PLEXO/main/aat_responses.user.js
 // @name         AAT · Listar respuestas (Connected Supplier)
 // @namespace    https://aatconsultoria.com/
-// @version      1.3.2
+// @version      1.4.0
 // @description  Saca a CSV todas las Submitted Responses de un periodo, con su RFx, su PO y su importe, leyéndolas del propio portal. No hace falta el Power BI.
 // @author       AAT CONSULTORIA DE PROYECTOS SL
 // @match        https://appcodeplatform.ericsson.net/ConnectedSupplier*
+// @match        https://aat-consultoria.github.io/PLEXO/*
 // @grant        none
 // @run-at       document-idle
 // @noframes
@@ -52,7 +53,16 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.3.2';
+  const VERSION = '1.4.0';
+
+  // Fuera del portal, este script no hace NADA salvo decir que existe.
+  // Lo usa la pagina de instalacion para comprobar DE VERDAD que esta puesto,
+  // en lugar de fiarse de que el usuario haya seguido bien los pasos.
+  // Va lo primero a proposito: asi no se crea el boton flotante ni se toca nada.
+  if (location.hostname !== 'appcodeplatform.ericsson.net') {
+    document.documentElement.setAttribute('data-aat-resp', VERSION);
+    return;
+  }
   const LOGO_AAT = 'https://aatconsultoria.com/wp-content/uploads/2021/07/AAT_Logo_White.png';
 
   const ESPERA_CARGA  = 45000;

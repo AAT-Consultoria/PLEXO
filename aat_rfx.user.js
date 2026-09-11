@@ -3,21 +3,23 @@
 // @downloadURL  https://raw.githubusercontent.com/AAT-Consultoria/PLEXO/main/aat_rfx.user.js
 // @name         AAT · Gestionar RFx (Connected Supplier)
 // @namespace    https://aatconsultoria.com/
-// @version      19.0.1
+// @version      19.1.0
 // @description  Panel de gestión de RFx en Open Requests: busca pendientes, las clasifica con las reglas de los coordinadores y acepta una a una desde la ficha individual, nunca desde la lista.
 // @author       AAT CONSULTORIA DE PROYECTOS SL
 // @match        https://appcodeplatform.ericsson.net/ConnectedSupplier*
+// @match        https://aat-consultoria.github.io/PLEXO/*
 // @grant        none
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
 //
-// ── ANTES DE REPARTIRLO A LOS GESTORES ──────────────────────────────────────────────
-// 1) Host real ya fijado: appcodeplatform.ericsson.net (verificado en el portal 25-ago-2026).
-// 2) Aloja este fichero en aatconsultoria.com y descomenta estas dos líneas:
-//        // @updateURL    https://aatconsultoria.com/nexo/aat_rfx.user.js
-//        // @downloadURL  https://aatconsultoria.com/nexo/aat_rfx.user.js
-//    Con eso Tampermonkey se trae él solo cada versión nueva.
+// ── CÓMO SE REPARTE ─────────────────────────────────────────────────────────────────
+// Host del portal: appcodeplatform.ericsson.net (verificado 25-ago-2026).
+// El fichero vive en el repositorio PLEXO y Tampermonkey se trae él solo cada versión
+// nueva desde el @updateURL de arriba. Para publicar un cambio basta con subirlo
+// SUBIENDO EL NÚMERO DE @version: si el número no cambia, nadie se actualiza.
+// La página de instalación para los gestores está en
+//        https://aat-consultoria.github.io/PLEXO/
 //
 // @noframes ES OBLIGATORIO: el panel crea un iframe del propio portal como motor.
 // Sin esa línea el script se inyectaría también dentro de su propio motor.
@@ -26,7 +28,16 @@
 (() => {
   'use strict';
 
-  const VERSION = '19.0.1';
+  const VERSION = '19.1.0';
+
+  // Fuera del portal, este script no hace NADA salvo decir que existe.
+  // Lo usa la pagina de instalacion para comprobar DE VERDAD que esta puesto,
+  // en lugar de fiarse de que el usuario haya seguido bien los pasos.
+  // Va lo primero a proposito: asi no se crea el boton flotante ni se toca nada.
+  if (location.hostname !== 'appcodeplatform.ericsson.net') {
+    document.documentElement.setAttribute('data-aat-rfx', VERSION);
+    return;
+  }
   const LOGO_AAT = 'https://aatconsultoria.com/wp-content/uploads/2021/07/AAT_Logo_White.png';
 
   // Esta misma página hace de dos cosas según cómo se abra:
