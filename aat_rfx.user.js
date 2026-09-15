@@ -3,7 +3,7 @@
 // @downloadURL  https://raw.githubusercontent.com/AAT-Consultoria/PLEXO/main/aat_rfx.user.js
 // @name         AAT · Gestionar RFx (Connected Supplier)
 // @namespace    https://aatconsultoria.com/
-// @version      19.1.0
+// @version      21.3.1
 // @description  Panel de gestión de RFx en Open Requests: busca pendientes, las clasifica con las reglas de los coordinadores y acepta una a una desde la ficha individual, nunca desde la lista.
 // @author       AAT CONSULTORIA DE PROYECTOS SL
 // @match        https://appcodeplatform.ericsson.net/ConnectedSupplier*
@@ -13,32 +13,134 @@
 // @noframes
 // ==/UserScript==
 //
-// ── CÓMO SE REPARTE ─────────────────────────────────────────────────────────────────
-// Host del portal: appcodeplatform.ericsson.net (verificado 25-ago-2026).
-// El fichero vive en el repositorio PLEXO y Tampermonkey se trae él solo cada versión
-// nueva desde el @updateURL de arriba. Para publicar un cambio basta con subirlo
-// SUBIENDO EL NÚMERO DE @version: si el número no cambia, nadie se actualiza.
-// La página de instalación para los gestores está en
-//        https://aat-consultoria.github.io/PLEXO/
-//
-// @noframes ES OBLIGATORIO: el panel crea un iframe del propio portal como motor.
-// Sin esa línea el script se inyectaría también dentro de su propio motor.
 // ─────────────────────────────────────────────────────────────────────────────────────
 
+//
+// v20 · «Pegar lista…»: el gestor pega la columna de RFx que le ha aprobado un
+// coordinador y la herramienta las busca UNA A UNA en el portal antes de enseñarlas.
+// La lista es una PROPUESTA, no una orden:
+//   · Solo se admite 7 + 9 cifras. Lo demás se descarta CON SU MOTIVO, nunca en
+//     silencio: notación científica de Excel, decimales, cifras de menos, duplicados.
+//   · Las que no aparecen en Open Requests se cantan una por una.
+//   · Se preselecciona lo que trae la lista, pero las VETADAS por regla de coordinador
+//     salen desmarcadas y ejecutar() sigue sacándolas de la cola pase lo que pase.
+//   · Simular y Aceptar siguen siendo dos botones distintos, y aceptar sigue pidiendo
+//     confirmación con el desglose delante.
+//
+// v20.1 · Filtro «Selección» (Todas / Marcadas / Sin marcar). Con una lista larga, el
+// aviso de «tienes marcadas que no estás viendo» te dice que pasa algo pero no qué:
+// esto deja ver la cola de aceptación tal cual, antes de pulsar. La cuenta de
+// «Marcadas» se toma de S.sel.size a propósito, para que cuadre siempre con el número
+// del pie, que es el que manda al aceptar.
+//
+// v20.2 · «Buscar pendientes» acota de dos maneras, sueltas o juntas:
+//   · Por fechas, como siempre, o con «Sin fechas» para barrerlo todo (medido en el
+//     portal: 33 páginas, unas 990 RFx pendientes; pide confirmación porque tarda).
+//   · Por operador y servicio. AVISO para quien toque esto: ninguno de los dos es un
+//     campo del portal —el operador sale de la referencia y el servicio del recetario—,
+//     así que no achican la búsqueda, solo lo que llega puesto. Lo que sí hacen es
+//     evitar que se preseleccione nada fuera de lo pedido, que es lo que importa.
+//
+// v20.3 · El panel se reordena en dos pasos, que es como lo piensa el gestor:
+//   · PASO 1 «Buscar en el portal»: solo fechas (o «Sin fechas»). Nada más, porque
+//     nada más entiende el portal.
+//   · PASO 2 «Elegir dentro de lo encontrado»: operador, servicio, texto y «Ver».
+//     ELEGIR NO MARCA. Filtra lo que se ve y punto. Lo que se acepta es lo marcado, se
+//     vea o no, y eso sigue avisándose al aceptar.
+//   · El puente entre las dos cosas es un botón explícito, «Marcar solo lo que veo»,
+//     que además respeta la regla: no marca vetadas ni las de revisar.
+// En 20.2 los desplegables de operador y servicio estaban en la barra de búsqueda y
+// parecían criterios del portal, que es justo lo que NO son. De ahí la confusión.
+//
+// v20.4 · EL ATASCO DE LA PÁGINA 13. Cadena completa, medida en el portal:
+//   «Open Requests» no imprime «of N records» (las otras pantallas sí) → el troceado
+//   por fechas exigía ese número, así que aquí NO SE ACTIVABA NUNCA → un rango ancho se
+//   paginaba entero → a las 12 páginas saltaba el refresco preventivo, que obliga a
+//   volver andando hasta la 13 → la plataforma se atraganta ahí. Con rangos de una
+//   semana no se notaba; «Sin fechas» (33 páginas) lo destapa siempre.
+//   Arreglo: cuando no hay total de registros se parte por NÚMERO DE PÁGINAS, que sí
+//   está. El umbral (8) va por debajo del refresco preventivo (12) para que ningún
+//   tramo llegue nunca a necesitarlo.
+//   Y de paso MAX_PROFUNDIDAD sube de 7 a 14: con 7 el troceado se quedaba sin fondo
+//   antes de llegar al día suelto (365/2⁷ ≈ 3 días, y con 11 años ≈ 33), así que un
+//   pico concentrado seguía dando un tramo enorme. Lo cazó la simulación, no el portal.
+//
+// v20.5 · EL ATASCO DE LA PÁGINA 13, esta vez de verdad. La explicación de 20.4 era
+//   falsa: «Open Requests» SÍ imprime «of N records» (se leyó mal, antes de buscar) y el
+//   troceado sí se activaba. Lo que pasa es que las 217 RFx eran TODAS DEL MISMO DÍA, y
+//   un día no se puede partir por fechas: 15 páginas a pelo, refresco preventivo en la
+//   12, y a por la 13.
+//   La causa está en irPagina(): el paginador es una ventana deslizante, así que desde
+//   la página 1 el «13» no es pulsable y hay que ir con la flecha «siguiente» — pero la
+//   espera exigía estar YA en la 13 después de ese primer clic, que lleva a la 2. Los
+//   45 s se agotaban tres veces y se daba por muerta una página que estaba perfecta:
+//   medido en el portal, andando de una en una se llega a la 13 en 1-2 s por página.
+//   Ahora se espera la página a la que ese clic lleva, no la del final del viaje.
+//
+// v20.6 · Los contadores de los filtros van EN CASCADA. Antes cada grupo contaba sobre
+//   el resultado entero, así que con «Orange 18» puesto el grupo de servicios seguía
+//   diciendo «Diseño 20»: un número imposible que hace dudar de toda la pantalla.
+//   Ahora cada grupo cuenta sobre lo que dejan pasar los demás filtros (menos el suyo,
+//   para poder cambiar de opción dentro de él), y las opciones sin nada detrás se
+//   quedan a la vista pero apagadas, para que los botones no bailen de sitio.
+//   De paso, un único `pasaFiltro(fila, omitir)` sirve a la tabla Y a los contadores.
+//   Tenerlos por duplicado es exactamente cómo se llega a una tabla que no cuadra con
+//   su propio título.
+//
+// v21.0 · MARCHA ATRÁS sobre la aceptación automática, pedida por los gestores.
+//   · El botón «clasificar» sale ahora en TODAS las filas con clave, no solo en las de
+//     «revisar»: para dar marcha atrás sobre una que se acepta sola hay que poder
+//     abrirla.
+//   · Dentro, si ese OPERADOR#importe hoy se acepta solo, aparece «sacarla de la
+//     aceptación automática». Retira el AUTOMATISMO, no la posibilidad: pasa a
+//     «revisar», así que deja de preseleccionarse pero se puede aceptar a mano tras
+//     mirarla. Y se deshace cuando se quiera.
+//   · Alcanza a todas las de ese operador e importe: corrige la regla, no el caso.
+//   · Surte efecto EN EL ACTO y en el ordenador del gestor, sin esperar a nada. Pero
+//     la tabla de la verdad vive dentro de este fichero, así que para que valga para
+//     todos hay que exportar la aportación, quitar la regla aquí y publicar versión
+//     nueva. La caja de Aportaciones dice, regla a regla, si sigue viva en el script o
+//     si ya se recogió y esa retirada sobra.
+//
+// v21.1 · «Copiar aviso para Pepe». El mensaje no dice «quita la 28.09»: trae LA LÍNEA
+//   LITERAL que hay que borrar, sacada de la propia tabla, más los pasos (no tocar
+//   no_aceptar, subir las dos versiones, pasar test_release.js) y un bloque JSON al
+//   final para que algún día una herramienta lo aplique sola. Quien mantiene el script
+//   no tiene que buscar nada ni interpretar nada. Las que ya no están en la tabla no
+//   salen en el aviso: si no, se pediría dos veces lo mismo.
+//
+// v21.2 · El aviso sale del propio cuadro: «Guardar y copiar aviso», con el nombre de
+//   quien lo pide ahí mismo. Antes había que guardar, abrir Aportaciones y buscar el
+//   botón; el aviso interesa en el momento de retirar, no tres clics después. El botón
+//   se queda apagado mientras no esté marcado «Sí, que pase a revisar»: apagado dice
+//   más que escondido, porque se ve que existe y por qué no se puede usar todavía.
+//
+// v21.3 · Dos cosas:
+//   · FALLO: al retirar, la fila seguía diciendo «aceptar» y seguía MARCADA. La decisión
+//     se calcula al recoger y se guarda en la fila; nadie se la volvía a preguntar. Se
+//     añade reevaluar(), que repasa todas las filas —una retirada afecta a todas las de
+//     ese operador e importe, no solo a la abierta—, las desmarca, y al devolverla las
+//     vuelve a marcar. Sin esto, «dar marcha atrás» dejaba la RFx en la cola de
+//     aceptación, que es exactamente lo contrario de lo pedido.
+//   · El aviso se puede mandar por correo: «Guardar y enviar aviso» abre Outlook con
+//     todo escrito. El cuerpo es una versión corta del mismo generador, porque un
+//     mailto largo lo trunca Outlook sin decir nada; si aun así no cabe, no se intenta:
+//     se copia entero y se avisa. El destinatario se pone una vez (o de fábrica, en
+//     CORREO_MANTENIMIENTO, para que venga puesto a todos los gestores).
+//
+// v21.3.1 · Abrir «Aportaciones» a media tabla sube el panel arriba. La caja se pinta
+//   sobre el listado y comparte contenedor con él, así que desde la mitad se abría
+//   fuera de la vista y parecía que el botón estaba muerto. Al cerrarla no se toca el
+//   scroll: ahí sí interesa volver a la fila que estabas mirando.
 (() => {
   'use strict';
 
-  const VERSION = '19.1.0';
-
-  // Fuera del portal, este script no hace NADA salvo decir que existe.
-  // Lo usa la pagina de instalacion para comprobar DE VERDAD que esta puesto,
-  // en lugar de fiarse de que el usuario haya seguido bien los pasos.
-  // Va lo primero a proposito: asi no se crea el boton flotante ni se toca nada.
-  if (location.hostname !== 'appcodeplatform.ericsson.net') {
-    document.documentElement.setAttribute('data-aat-rfx', VERSION);
-    return;
-  }
+  const VERSION = '21.3.1';
   const LOGO_AAT = 'https://aatconsultoria.com/wp-content/uploads/2021/07/AAT_Logo_White.png';
+  // PARA QUIEN PUBLIQUE EL SCRIPT: pon aquí el correo de quien mantiene las tablas y
+  // todos los gestores lo tendrán ya puesto al redactar el aviso. Si se queda vacío,
+  // el correo se abre sin destinatario y cada uno lo escribe (y se le recuerda).
+  const CORREO_MANTENIMIENTO = '';
 
   // Esta misma página hace de dos cosas según cómo se abra:
   //  · normal  → pone el botón flotante «Aceptar RFx» y nada más.
@@ -60,7 +162,21 @@
   const REINTENTOS_PAGINA   = 2;   // reintento del mismo clic antes de refrescar el motor
   const PAGS_POR_REFRESCO = 12;   // refresco preventivo del motor durante la recogida
   const MAX_POR_TRAMO   = 150;    // 10 páginas. Por encima de esto, el rango se parte en dos.
-  const MAX_PROFUNDIDAD = 7;      // hasta 128 tramos; suficiente para partir un año en días
+  // MEDIDO EN EL PORTAL (14-sep-2026): «Open Requests» NO imprime el «of N records» que
+  // sí dan las otras pantallas. Sin ese número, el troceado por fechas —que es toda la
+  // defensa contra atascarse paginando— no llegaba a activarse NUNCA aquí. Se tapaba
+  // solo porque con rangos de una semana no se llegaba a tantas páginas. Así que cuando
+  // no hay total se usa lo que sí hay: el número de páginas del paginador.
+  // 8 está por debajo de PAGS_POR_REFRESCO a propósito: si ningún tramo llega a 12
+  // páginas, el refresco preventivo —que obliga a volver andando hasta la página N, que
+  // es donde la plataforma se atraganta— no se dispara jamás.
+  const MAX_PAGINAS_TRAMO = 8;
+  // Antes era 7, y la nota decía «suficiente para partir un año en días». No lo era:
+  // 365/2⁷ son casi 3 días, y con 11 años («Sin fechas») el tramo más fino se quedaba
+  // en 33. Si esos días traen mucha RFx, el tramo sigue siendo enorme y se acaba
+  // paginando igual. Con 14 se llega al día suelto incluso partiendo de 2015 (2¹⁴ =
+  // 16.384 > 4.275 días). No cuesta nada: solo se baja donde de verdad hace falta.
+  const MAX_PROFUNDIDAD = 14;
   const RFX_POR_REFRESCO  = 20;   // refresco durante la aceptación (validado con 326 RFx)
   const RFX_POR_REFRESCO_VER = 25;
 
@@ -483,12 +599,53 @@
     return Number.isFinite(n) ? n : null;
   }
 
+  // ═══ LISTA PEGADA ═════════════════════════════════════════════════════════════════
+  // Pegar una columna de Excel es cómodo y traicionero a partes iguales. Excel entrega
+  // «7,00427E+09» si la celda es numérica y estrecha, se come el cero final si alguien
+  // la formateó como número, y un rango filtrado copia TAMBIÉN las filas ocultas.
+  // Ninguna de esas cosas avisa: dan números que PARECEN RFx. Así que aquí no se
+  // descarta nada en silencio: todo lo que no sea un 7 + 9 cifras se devuelve con su
+  // motivo para enseñárselo al gestor.
+  function parsearLista(texto) {
+    const numeros = [], vistos = new Set(), duplicados = [], descartados = [];
+    const trozos = String(texto || '')
+      .replace(/\u00a0/g, ' ')                    // espacio duro que pega Excel
+      // «7,00427E+09» lleva la coma como separador DECIMAL, no como separador de celdas.
+      // Si se parte por ahí salen dos trozos raros y dos avisos confusos en vez de uno
+      // claro. Se normaliza a punto antes de trocear para que llegue entero al examen.
+      .replace(/(\d)[,](\d*\s*[eE])/g, '$1.$2')
+      .split(/[\s,;|]+/)
+      .map(t => t.replace(/^["'\u201c\u201d]+|["'\u201c\u201d]+$/g, '').trim())
+      .filter(Boolean);
+
+    for (const crudo of trozos) {
+      const t = crudo.replace(/\.$/, '');
+      let motivo = null;
+      if (/e\s*\+?\s*\d+/i.test(t))            motivo = 'Excel lo ha convertido a notación científica; formatea la columna como Texto y vuelve a copiar';
+      else if (/[.,]\d/.test(t))                 motivo = 'lleva decimales';
+      else if (/[^0-9]/.test(t))                 motivo = 'tiene caracteres que no son cifras';
+      else if (t.length !== 10)                  motivo = `tiene ${t.length} cifras y una RFx tiene 10`;
+      else if (t[0] !== '7')                     motivo = 'no empieza por 7';
+      if (motivo) { descartados.push({ crudo, motivo }); continue; }
+      if (vistos.has(t)) { duplicados.push(t); continue; }
+      vistos.add(t); numeros.push(t);
+    }
+    return { numeros, duplicados, descartados, pegados: trozos.length };
+  }
+
   function decidir(rfx) {
     const op = operadorDe(rfx.ref);
     const val = importeDe(rfx.valor);
     if (op === '?' || val === null) return { d: 'wait', motivo: 'operador/importe no reconocido' };
     const clave = op + '#' + val.toFixed(2);
     if (REGLAS.no_aceptar[clave]) return { d: 'stop', motivo: 'regla: no aceptar', srv: REGLAS.no_aceptar[clave].srv };
+    // La marcha atrás del gestor va DESPUÉS del veto de coordinador (ése no se toca) y
+    // ANTES de la regla de aceptar. No bloquea: devuelve el importe a «revisar», que es
+    // lo que significa sacarlo de la automática — se retira el automatismo, no la
+    // posibilidad de aceptarlo mirándolo. Y por eso mismo se puede deshacer.
+    const ret = S.retiradas && S.retiradas[clave];
+    if (ret && REGLAS.aceptar[clave])
+      return { d: 'wait', motivo: 'retirada de la automática por el gestor', srv: REGLAS.aceptar[clave].srv, retirada: true };
     if (REGLAS.aceptar[clave])    return { d: 'go',   motivo: 'regla: aceptar',    srv: REGLAS.aceptar[clave].srv };
     return { d: 'wait', motivo: `sin regla para ${op} ${val.toFixed(2)}€` };
   }
@@ -838,25 +995,38 @@
         }
         const ul = M.liPag()?.parentElement;
         if (!ul) { await dormir(800); continue; }
-        let enlace = null;
+
+        // MEDIDO EN EL PORTAL: el paginador es una ventana deslizante —«1 2 3 4 5 … 15»
+        // en la página 1, «1 … 6 7 8 … 15» en la 7—, así que la mayoría de los números
+        // NO son pulsables desde donde estás y hay que ir con la flecha «siguiente».
+        // Y ahí estaba el fallo: se esperaba llegar a `destino` después de UN clic. Con
+        // destino lejano —lo que pasa justo tras el refresco preventivo, que deja el
+        // motor en la 1 y pide la 13— ese clic llevaba a la 2, la espera exigía la 13,
+        // y se agotaban los 45 s tres veces seguidas. El portal no tenía la culpa:
+        // andando de una en una se llega a la 13 en un par de segundos por página.
+        // Hay que esperar la página a la que ESE clic lleva, no la del final del viaje.
+        let enlace = null, esperado = destino;
         for (const li of ul.children)
           if (li.innerText.trim() === String(destino)) { enlace = li.querySelector('a'); break; }
         if (!enlace) {
           const fuera = [...ul.parentElement.querySelectorAll('a')].filter(a => !ul.contains(a));
-          if (fuera.length) enlace = fuera[fuera.length - 1];   // flecha «siguiente»
+          if (fuera.length) {
+            enlace = fuera[fuera.length - 1];                  // flecha «siguiente»
+            esperado = actual != null ? actual + 1 : null;     // un paso, no el destino
+          }
         }
         if (!enlace) { log && log(`  no encuentro cómo llegar a la página ${destino}`, 'w'); return false; }
         const previa = M.huella();
         const habiaMarcas = M.marcarRejilla();
         enlace.click();
-        if (!await M.esperarCambioEstable(previa, ESPERA_PAGINA, habiaMarcas, destino)) {
+        if (!await M.esperarCambioEstable(previa, ESPERA_PAGINA, habiaMarcas, esperado)) {
           if (reintentos < REINTENTOS_PAGINA) {
             reintentos++;
-            log && log(`  la página ${destino} no respondió en ${ESPERA_PAGINA / 1000} s; reintento ${reintentos}/${REINTENTOS_PAGINA}`, 'w');
+            log && log(`  la página ${esperado} no respondió en ${ESPERA_PAGINA / 1000} s; reintento ${reintentos}/${REINTENTOS_PAGINA}`, 'w');
             await dormir(3000);
             continue;
           }
-          log && log(`  la página ${destino} no responde tras ${REINTENTOS_PAGINA} reintentos`, 'w');
+          log && log(`  la página ${esperado} no responde tras ${REINTENTOS_PAGINA} reintentos (iba camino de la ${destino})`, 'w');
           return false;
         }
         reintentos = 0;
@@ -989,25 +1159,67 @@
       return { filas: [...acumulado.values()], completo: avisos.length === 0, avisos };
     },
 
+    // Igual que recogerPorTramos, pero la fuente es la lista del coordinador en vez de
+    // un rango de fechas. Se busca RFx a RFx: son pocas y así cada una queda verificada
+    // contra el portal antes de que nadie piense en aceptarla.
+    async recogerPorNumeros(nums, log, avance) {
+      const filas = [];
+      const noEstan = [];
+      await M.iniciar(log);
+      let desdeRefresco = 0;
+      for (let i = 0; i < nums.length; i++) {
+        if (S.abortar) { log('■ Abortado.', 'w'); break; }
+        const num = nums[i];
+        avance && avance(i + 1, nums.length);
+
+        if (desdeRefresco >= RFX_POR_REFRESCO) {
+          log(`↻ Refrescando el motor tras ${RFX_POR_REFRESCO} RFx…`, 'w');
+          try { await M.iniciar(log); desdeRefresco = 0; await dormir(800); }
+          catch (e) { log('  el refresco falló, sigo…', 'w'); }
+        }
+        try {
+          // Sin fechas: la lista manda, y puede traer RFx más viejas que cualquier rango.
+          await M.volverALista(log, true);
+          await M.filtrarPorNumero(num);
+          const fila = M.extraerPagina().find(f => f.num === num);
+          if (fila) { filas.push(fila); log(`  ${i + 1}/${nums.length} ${num} · ${fila.proyecto || 'sin proyecto'} · ${fila.valor}`); }
+          else { noEstan.push({ num, motivo: 'no aparece en Open Requests' }); log(`  ${i + 1}/${nums.length} ${num} · no está en Open Requests`, 'w'); }
+        } catch (e) {
+          noEstan.push({ num, motivo: e.message });
+          log(`  ${i + 1}/${nums.length} ${num} · ${e.message}`, 'e');
+        }
+        desdeRefresco++;
+        await dormir(400);
+      }
+      return { filas, noEstan };
+    },
+
     async tramo(desde, hasta, log, diagnostico, acumulado, avisos, prof) {
       if (S.abortar) return;
       await M.iniciar(log);
       await M.fijarFechas(desde, hasta, log);
       await M.buscar(log);
       const total = M.totalRegistros();
+      const paginas = M.liPag() ? M.pagTotal() : 1;
       const dias = diasEntre(desde, hasta);
 
-      if (total != null && total > MAX_POR_TRAMO && dias >= 1 && prof < MAX_PROFUNDIDAD) {
+      // Dos varas de medir, porque no todas las pantallas dan el total de registros.
+      // Si lo hay, manda él; si no, mandan las páginas. Antes solo existía la primera,
+      // y en «Open Requests», que no da el total, el tramo no se partía nunca.
+      const demasiado = total != null ? total > MAX_POR_TRAMO : paginas > MAX_PAGINAS_TRAMO;
+      const cuanto = total != null ? `${total} RFx` : `${paginas} páginas`;
+
+      if (demasiado && dias >= 1 && prof < MAX_PROFUNDIDAD) {
         const medio = mitadEntre(desde, hasta);
-        log && log(`✂ ${desde} → ${hasta}: ${total} RFx, demasiadas de una tacada. Lo parto por ${medio}.`);
+        log && log(`✂ ${desde} → ${hasta}: ${cuanto}, demasiadas de una tacada. Lo parto por ${medio}.`);
         await M.tramo(desde, medio, log, diagnostico, acumulado, avisos, prof + 1);
         await M.tramo(sumarDias(medio, 1), hasta, log, diagnostico, acumulado, avisos, prof + 1);
         return;
       }
-      if (total != null && total > MAX_POR_TRAMO)
-        log && log(`⚠ ${desde} → ${hasta}: ${total} RFx y ya no puedo partir más. Voy por paginación; puede atascarse.`, 'w');
+      if (demasiado)
+        log && log(`⚠ ${desde} → ${hasta}: ${cuanto} y ya no puedo partir más. Voy por paginación; puede atascarse.`, 'w');
 
-      log && log(`▸ Tramo ${desde} → ${hasta} · ${total != null ? total : '¿?'} RFx`);
+      log && log(`▸ Tramo ${desde} → ${hasta} · ${total != null ? total + ' RFx' : paginas + ' págs.'}`);
       const r = await M.recogerTodo({ desde, hasta }, log, diagnostico, acumulado);
       if (!r.completo && r.motivo !== 'sin resultados')
         avisos.push(`${desde}→${hasta}: ${r.motivo}`);
@@ -1112,16 +1324,22 @@
     abortar: false,
     corriendo: false,
     buscando: false,
-    filtro: { op: '', srv: '', txt: '' },
+    filtro: { op: '', srv: '', txt: '', sel: '' },   // sel: '' todas · 'si' marcadas · 'no' sin marcar
     candidatas: {},         // clave OP#importe → propuesta para la tabla de la verdad
     clasificaciones: {},    // clave OP#importe (o rfx:NNN si el importe es ambiguo)
-    apartadas: {}           // clasificaciones viejas que dejaron de ser válidas
+    apartadas: {},          // clasificaciones viejas que dejaron de ser válidas
+    retiradas: {},          // clave OP#importe → sacada de la aceptación automática por el gestor
+    gestor: '',             // quién lo pide, para que Pepe sepa a quién preguntar
+    correoMant: ''          // a quién se le manda el aviso, si se quiere otro distinto
   };
 
   // Las candidatas son trabajo del gestor, no un ajuste: sobreviven a cerrar la ventana.
   const ALMACEN = 'aat_rfx_candidatas';
   const ALMACEN_CLAS = 'aat_rfx_clasificaciones';
   const ALMACEN_APAR = 'aat_rfx_apartadas';
+  const ALMACEN_RET  = 'aat_rfx_retiradas';
+  const ALMACEN_QUIEN = 'aat_rfx_gestor';
+  const ALMACEN_CORREO = 'aat_rfx_correo_mant';
   function cargarCandidatas() {
     try {
       const crudo = localStorage.getItem(ALMACEN);
@@ -1132,6 +1350,12 @@
       if (crudo) S.clasificaciones = JSON.parse(crudo) || {};
     } catch (e) { S.clasificaciones = {}; }
     try {
+      S.gestor = localStorage.getItem(ALMACEN_QUIEN) || '';
+      S.correoMant = localStorage.getItem(ALMACEN_CORREO) || '';
+      const crudo0 = localStorage.getItem(ALMACEN_RET);
+      if (crudo0) S.retiradas = JSON.parse(crudo0) || {};
+    } catch (e) {}
+    try {
       const crudo = localStorage.getItem(ALMACEN_APAR);
       if (crudo) S.apartadas = JSON.parse(crudo) || {};
     } catch (e) { S.apartadas = {}; }
@@ -1140,6 +1364,9 @@
     try { localStorage.setItem(ALMACEN, JSON.stringify(S.candidatas)); } catch (e) {}
     try { localStorage.setItem(ALMACEN_CLAS, JSON.stringify(S.clasificaciones)); } catch (e) {}
     try { localStorage.setItem(ALMACEN_APAR, JSON.stringify(S.apartadas)); } catch (e) {}
+    try { localStorage.setItem(ALMACEN_RET, JSON.stringify(S.retiradas)); } catch (e) {}
+    try { localStorage.setItem(ALMACEN_QUIEN, S.gestor || ''); } catch (e) {}
+    try { localStorage.setItem(ALMACEN_CORREO, S.correoMant || ''); } catch (e) {}
   }
   const nCandidatas = () => Object.keys(S.candidatas).length;
 
@@ -1160,33 +1387,64 @@
     return sueltas;
   }
   const nAportes = () => Object.keys(S.candidatas).length + Object.keys(S.clasificaciones).length
-                       + Object.keys(S.apartadas || {}).length;
+                       + Object.keys(S.apartadas || {}).length + Object.keys(S.retiradas || {}).length;
 
   // El filtro afecta SOLO a lo que se ve. La selección es global y no se toca al
   // filtrar: si se vaciara, cambiar de vista borraría trabajo hecho. La contrapartida
   // es que puede haber RFx marcadas fuera de la vista, y eso hay que cantarlo bien
   // alto — en el contador y en la confirmación de aceptar.
-  function visibles() {
+  // UN SOLO criterio de filtrado, con la posibilidad de saltarse una dimensión. Eso
+  // último es lo que permite contar «en cascada»: los números de un grupo se cuentan
+  // sobre lo que dejan pasar LOS DEMÁS filtros, nunca sobre el total. Si no, la
+  // pantalla miente: con Orange (18) puesto, el grupo Servicio decía «Diseño 20»,
+  // que es imposible y hace dudar de todo lo demás.
+  // Ojo al mantenerlo: este criterio y el de los contadores tienen que ser el MISMO.
+  // Tenerlos por duplicado es cómo se acaba con una tabla que no cuadra con su título.
+  function pasaFiltro(r, omitir) {
     const f = S.filtro;
+    if (omitir !== 'sel') {
+      if (f.sel === 'si' && !S.sel.has(r.num)) return false;
+      if (f.sel === 'no' && S.sel.has(r.num))  return false;
+    }
+    if (omitir !== 'op' && f.op && operadorDe(r.ref) !== f.op) return false;
+    if (omitir !== 'srv' && f.srv) {
+      const srv = servicioDe(r);
+      if (f.srv === '-' ? srv !== '' : srv !== f.srv) return false;
+    }
     const txt = f.txt.trim().toLowerCase();
-    return S.rfx.filter(r => {
-      if (f.op && operadorDe(r.ref) !== f.op) return false;
-      if (f.srv) {
-        const srv = servicioDe(r);
-        if (f.srv === '-' ? srv !== '' : srv !== f.srv) return false;
-      }
-      if (txt) {
-        // La caja de texto busca también por decisión y por servicio. Así, aunque los
-        // botones de decisión ya no estén, escribir «revisar» sigue funcionando.
-        const dec = { go: 'aceptar', stop: 'vetada no aceptar', wait: 'revisar' }[(r.regla || {}).d] || '';
-        const paja = `${r.num} ${r.proyecto} ${r.site} ${r.ref} ${r.valor} ${dec} ${nombreServicio(servicioDe(r))}`.toLowerCase();
-        if (!paja.includes(txt)) return false;
-      }
-      return true;
-    });
+    if (txt) {
+      // La caja de texto busca también por decisión y por servicio. Así, aunque los
+      // botones de decisión ya no estén, escribir «revisar» sigue funcionando.
+      const dec = { go: 'aceptar', stop: 'vetada no aceptar', wait: 'revisar' }[(r.regla || {}).d] || '';
+      const paja = `${r.num} ${r.proyecto} ${r.site} ${r.ref} ${r.valor} ${dec} ${nombreServicio(servicioDe(r))}`.toLowerCase();
+      if (!paja.includes(txt)) return false;
+    }
+    return true;
   }
 
-  const hayFiltro = () => !!(S.filtro.op || S.filtro.srv || S.filtro.txt.trim());
+  function visibles() { return S.rfx.filter(r => pasaFiltro(r, null)); }
+
+  // La decisión se calcula UNA vez, al recoger, y se guarda en la fila. Así que cuando
+  // el gestor retira un importe de la automática hay que volver a preguntársela a todas
+  // las filas: si no, la tabla sigue enseñando «aceptar» y —peor— la RFx sigue marcada,
+  // que era justo lo que se quería deshacer. Se repasan todas porque una retirada afecta
+  // a todas las de ese operador e importe, no solo a la que tenías abierta.
+  //   · Al retirar   → esas filas se DESMARCAN: ya no son cola de aceptación.
+  //   · Al devolverla → vuelven a marcarse las que la regla aprueba, como tras buscar.
+  // Devuelve cuántas cambiaron de estado, para poder contarlo en el registro.
+  function reevaluar(claveTocada) {
+    let desmarcadas = 0, marcadas = 0;
+    for (const f of S.rfx) {
+      const antes = (f.regla || {}).d;
+      f.regla = decidir(f);
+      if (claveTocada && claveDe(f) !== claveTocada) continue;
+      if (f.regla.d !== 'go' && S.sel.has(f.num)) { S.sel.delete(f.num); desmarcadas++; }
+      else if (f.regla.d === 'go' && antes && antes !== 'go' && !S.sel.has(f.num)) { S.sel.add(f.num); marcadas++; }
+    }
+    return { desmarcadas, marcadas };
+  }
+
+  const hayFiltro = () => !!(S.filtro.op || S.filtro.srv || S.filtro.sel || S.filtro.txt.trim());
   const ocultasMarcadas = () => {
     if (!hayFiltro()) return [];
     const aLaVista = new Set(visibles().map(r => r.num));
@@ -1216,6 +1474,9 @@
       const ocupado = S.corriendo || S.buscando;
       q('qStop').style.display = ocupado ? '' : 'none';
       q('qBuscar').disabled = ocupado;
+      q('qPegar').disabled  = ocupado;
+      q('qSinFechas').disabled = ocupado;
+      q('qSoloVisible').disabled = ocupado || !S.rfx.length;
       q('qNone').disabled   = ocupado || !S.rfx.length;
       q('qRun').disabled    = ocupado || !S.sel.size;
       q('qSim').disabled    = ocupado || !S.sel.size;
@@ -1249,7 +1510,15 @@
 .axp .warn{background:#fff4e5;border-bottom:1px solid #f0d9b5;padding:.4em .7em;font-size:.72em;color:#7a4b00}
 .axp .bar{display:flex;flex-wrap:wrap;gap:.45em;align-items:flex-end;padding:.5em .7em;border-bottom:1px solid #e3e8ed;background:#f8fafc}
 .axp .bar label{font-size:.62em;color:#5a646e;display:block;margin-bottom:.25em}
+.axp .paso{font-size:.66em;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#5a646e;background:#eceff2;border-radius:4px;padding:.25em .55em;align-self:center;white-space:nowrap}
+.axp .pista{font-size:.68em;color:#5a646e;background:#f8fafc;border-bottom:1px solid #e3e8ed;padding:.3em .8em}
+.axp .pista b{color:#16191d}
 .axp .bar input[type=text]{padding:.28em .4em;border:1px solid #c6ccd3;border-radius:5px;font:inherit;width:7.2em}
+.axp .bar input[type=text]:disabled{background:#eceff2;color:#9aa4ae}
+.axp .bar select{padding:.28em .4em;border:1px solid #c6ccd3;border-radius:5px;font:inherit;background:#fff;color:#16191d}
+.axp .bar .tg[aria-pressed="true"]{border-color:#1668dc;background:#eaf3ff;color:#0f56b8;font-weight:600}
+.axp .ch:disabled{opacity:.38;cursor:default}
+.axp .cand.fuera{border-color:#c98a00;background:#fff4e5;color:#7a4b00}
 .axp .b{padding:.34em .62em;border:0;border-radius:5px;cursor:pointer;font:inherit;font-weight:600}
 .axp .b.p{background:#1668dc;color:#fff}.axp .b.p:hover{background:#0f56b8}
 .axp .b.g{background:#e6eaee;color:#22282e}.axp .b.g:hover{background:#d6dce2}
@@ -1387,19 +1656,29 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
     <b>Gestionar RFx · Open Requests <span class="ver">v${VERSION}</span></b><span class="x">&times;</span></div>
   <div class="warn">Nunca se marcan casillas en la lista ni se pulsa «Approve». La aceptación se hace en la ficha individual.</div>
   <div class="bar">
+    <span class="paso">1 · Buscar en el portal</span>
     <div><label>Creación desde</label><input type="text" id="qD" value="${haceDias(7)}"></div>
     <div><label>Creación hasta</label><input type="text" id="qH" value="${hoy()}"></div>
+    <button class="b g tg" id="qSinFechas" type="button" aria-pressed="false"
+      title="Barre TODAS las pendientes, sin mirar la fecha de creación. Son unas 33 páginas: tarda.">Sin fechas</button>
     <button class="b p" id="qBuscar">Buscar pendientes</button>
+    <button class="b g" id="qPegar">Pegar lista…</button>
     <span style="flex:1"></span>
     <button class="b g" id="qNone" disabled>Desmarcar todo</button>
   </div>
-  <div class="filtros">
+  <div class="filtros" id="qPaso2">
+    <span class="paso">2 · Elegir dentro de lo encontrado</span>
     <div class="gr" id="qFOp"><span class="et">Operador</span></div>
     <div class="gr" id="qFSrv"><span class="et">Servicio</span></div>
+    <div class="gr" id="qFSel"><span class="et">Ver</span></div>
     <input type="text" id="qFTxt" placeholder="RFx, proyecto, site, «revisar»…" autocomplete="off">
     <button class="b g" id="qFLimpiar" style="font-size:.72em;padding:.25em .6em">Quitar filtros</button>
+    <button class="b g" id="qSoloVisible" style="font-size:.72em;padding:.25em .6em"
+      title="Deja marcadas SOLO las que estás viendo (y que la regla aprueba). Elegir no marca nada por su cuenta.">Marcar solo lo que veo</button>
     <span class="vista" id="qVista"></span>
   </div>
+  <div class="pista" id="qPista">Elegir aquí <b>solo cambia lo que ves</b>: no marca ni desmarca nada.
+    Lo que se acepta es lo que esté marcado, se vea o no.</div>
   <div class="wrap">
     <div id="qCandBox" class="caja oculto"></div>
     <table><thead><tr>
@@ -1437,8 +1716,13 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
     const SERVICIOS = [['', 'Todos'], ['PIM', 'PIM'], ['EMR', 'EMR'], ['DIS', 'Diseño'], ['-', 'Pendiente']];
 
     function pintarFiltros() {
-      const cuentaOp = clave => S.rfx.filter(r => operadorDe(r.ref) === clave).length;
-      const cuentaSrv = v => S.rfx.filter(r => (v === '-' ? servicioDe(r) === '' : servicioDe(r) === v)).length;
+      // CASCADA. Cada grupo cuenta sobre lo que dejan pasar los OTROS filtros, nunca
+      // sobre el total. Es lo que hace que los números cuadren entre sí: con Orange
+      // puesto, la suma de los servicios da 18, no 254. Un grupo no se cuenta a sí
+      // mismo, para poder seguir cambiando de opción dentro de él.
+      const baseSel = S.rfx.filter(r => pasaFiltro(r, 'sel'));
+      const baseOp  = S.rfx.filter(r => pasaFiltro(r, 'op'));
+      const baseSrv = S.rfx.filter(r => pasaFiltro(r, 'srv'));
 
       const grupo = (cont, opciones, valorActual, alElegir) => {
         [...cont.querySelectorAll('.ch')].forEach(b => b.remove());
@@ -1446,28 +1730,45 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
           const b = D.createElement('button');
           b.type = 'button';
           b.className = 'ch';
-          b.setAttribute('aria-pressed', String(valorActual === o.valor));
+          const elegida = valorActual === o.valor;
+          // Una opción sin nada detrás se deja a la vista pero apagada: si se quitara,
+          // los botones bailarían de sitio a cada clic y se pulsaría el que no es.
+          b.disabled = o.n === 0 && !elegida;
+          b.setAttribute('aria-pressed', String(elegida));
           b.innerHTML = (o.color ? `<span class="pt" style="background:${o.color}"></span>` : '')
             + o.texto + (o.n != null ? ` <span class="n">${o.n}</span>` : '');
-          b.onclick = () => { alElegir(valorActual === o.valor && o.valor ? '' : o.valor); };
+          b.onclick = () => { alElegir(elegida && o.valor ? '' : o.valor); };
           cont.appendChild(b);
         }
       };
 
-      const ops = [{ valor: '', texto: 'Todos', n: S.rfx.length }];
+      const ops = [{ valor: '', texto: 'Todos', n: baseOp.length }];
       for (const clave of ['OSP', 'TME', 'VDF', '?']) {
-        const n = cuentaOp(clave);
-        if (!n) continue;
-        ops.push({ valor: clave, texto: OPERADORES[clave][0], color: OPERADORES[clave][1], n });
+        // El REPERTORIO de botones sale del resultado entero, para que no aparezcan y
+        // desaparezcan al filtrar; lo que cambia es el número que llevan dentro.
+        if (!S.rfx.some(r => operadorDe(r.ref) === clave)) continue;
+        ops.push({ valor: clave, texto: OPERADORES[clave][0], color: OPERADORES[clave][1],
+                   n: baseOp.filter(r => operadorDe(r.ref) === clave).length });
       }
       grupo($('qFOp'), ops, S.filtro.op, v => { S.filtro.op = v; repintar(); });
 
-      const srvs = [{ valor: '', texto: 'Todos', n: S.rfx.length }];
+      const coincideSrv = (r, v) => v === '-' ? servicioDe(r) === '' : servicioDe(r) === v;
+      const srvs = [{ valor: '', texto: 'Todos', n: baseSrv.length }];
       for (const [v, t] of SERVICIOS.slice(1)) {
-        const n = cuentaSrv(v);
-        if (n) srvs.push({ valor: v, texto: t, n });
+        if (!S.rfx.some(r => coincideSrv(r, v))) continue;
+        srvs.push({ valor: v, texto: t, n: baseSrv.filter(r => coincideSrv(r, v)).length });
       }
       grupo($('qFSrv'), srvs, S.filtro.srv, v => { S.filtro.srv = v; repintar(); });
+
+      // «Marcadas» también cuenta dentro de lo acotado: si dijera el total de la
+      // selección, volveríamos al problema de antes —un número que no cuadra con lo
+      // que hay delante—. El total de verdad, el que manda al aceptar, está en el pie.
+      const sels = [
+        { valor: '',   texto: 'Todas',      n: baseSel.length },
+        { valor: 'si', texto: 'Marcadas',   n: baseSel.filter(r => S.sel.has(r.num)).length, color: '#1668dc' },
+        { valor: 'no', texto: 'Sin marcar', n: baseSel.filter(r => !S.sel.has(r.num)).length }
+      ];
+      grupo($('qFSel'), sels, S.filtro.sel, v => { S.filtro.sel = v; repintar(); });
     }
 
     // ── Tabla ────────────────────────────────────────────────────────────────────────
@@ -1525,13 +1826,18 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
           lineaDesg = (regla.d === 'wait' ? '<span class="desg" style="color:#b0b8c0">sin desglose conocido</span>' : '');
         }
 
-        // Un solo botón: abre el diálogo donde se clasifica el servicio y, si procede,
-        // se propone como candidata. Solo en las que hoy no tienen decisión.
+        // Un solo botón, y ahora en TODAS las filas con clave, no solo en las de revisar:
+        // los gestores necesitan poder dar marcha atrás sobre una que hoy se acepta sola,
+        // y para eso hay que poder abrir el diálogo desde ella.
         const kClas = claveClasif(r);
+        const retirada = !!(clave && S.retiradas[clave]);
         const aportada = clave && (!!S.candidatas[clave] || !!S.clasificaciones[kClas]);
-        const botonCand = (regla.d === 'wait' && clave)
-          ? `<button class="cand${aportada ? ' puesta' : ''}" type="button" data-clave="${clave}" data-num="${r.num}">`
-            + (aportada ? '&#10003; clasificada' : 'clasificar') + '</button>'
+        const etiquetaCand = retirada ? '&#8634; retirada'
+                           : aportada ? '&#10003; clasificada'
+                           : 'clasificar';
+        const botonCand = clave
+          ? `<button class="cand${retirada ? ' fuera' : (aportada ? ' puesta' : '')}" type="button" `
+            + `data-clave="${clave}" data-num="${r.num}">${etiquetaCand}</button>`
           : '';
 
         const op = OPERADORES[operadorDe(r.ref)] || OPERADORES['?'];
@@ -1643,6 +1949,90 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
     // al momento; proponer para aceptación automática es una DECISIÓN de los
     // coordinadores y aquí solo se anota. Van juntos porque el gestor ya está mirando
     // esa RFx, pero no son lo mismo y el diálogo lo dice.
+    // ── Lista pegada por el gestor ───────────────────────────────────────────────────
+    function abrirPegarLista() {
+      const capa = D.createElement('div');
+      capa.className = 'axDlgCapa';
+      capa.innerHTML = `<div class="axDlgCaja">
+        <h3>Pegar lista de RFx</h3>
+        <div class="axDlgSub">La columna de números que te ha pasado el coordinador. Uno por línea,
+          o tal cual salga de Excel.</div>
+        <div class="axDlgNota"><b>Esto no acepta nada.</b> Busca cada RFx en el portal y te las
+          enseña en la tabla para que las revises. Aceptar sigue siendo un paso aparte.</div>
+        <textarea id="dLista" class="axDlgCampo" spellcheck="false"
+          style="height:9.5em;resize:vertical;font-family:ui-monospace,Consolas,monospace"
+          placeholder="7004232081&#10;7004232045&#10;7004232064"></textarea>
+        <div class="axDlgAyuda">Si Excel te las ha convertido en <b>7,00427E+09</b>, formatea la
+          columna como <b>Texto</b> y vuelve a copiar. El script detecta ese destrozo y te lo canta,
+          pero más vale traerlas bien.</div>
+        <div class="axDlgPie">
+          <button class="b g" id="dCancelar">Cancelar</button>
+          <button class="b p" id="dLeer">Buscar estas RFx</button>
+        </div></div>`;
+      panel.appendChild(capa);
+      const q = id => capa.querySelector('#' + id);
+      const cerrar = () => capa.remove();
+      q('dCancelar').onclick = cerrar;
+      capa.onclick = e => { if (e.target === capa) cerrar(); };
+      try { q('dLista').focus(); } catch (e) {}
+      q('dLeer').onclick = () => { const t = q('dLista').value; cerrar(); cargarDesdeLista(t); };
+    }
+
+    async function cargarDesdeLista(texto) {
+      const r = parsearLista(texto);
+      S.buscando = true; S.abortar = false;
+      sincronizarBotones();
+      reiniciarLog('▶ Lista pegada');
+      log(`Pegados ${r.pegados} elementos · ${r.numeros.length} RFx con formato bueno`);
+      if (r.duplicados.length)
+        log(`⚠ ${r.duplicados.length} repetidas en la lista; las busco una vez: ${r.duplicados.join(', ')}`, 'w');
+      for (const d of r.descartados) log(`✗ «${d.crudo}» se queda fuera: ${d.motivo}`, 'e');
+      if (!r.numeros.length) {
+        log('No hay ninguna RFx que buscar.', 'e');
+        S.buscando = false; sincronizarBotones();
+        return;
+      }
+      try {
+        S.rango = null;            // la lista manda: nada de filtrar por fechas después
+        const res = await M.recogerPorNumeros(r.numeros, log, barra);
+        S.rfx = res.filas; S.sel.clear(); S.res = [];
+        S.filtro = { op: '', srv: '', txt: '', sel: '' };
+        try { $('qFTxt').value = ''; } catch (e) {}
+
+        let go = 0, stop = 0, wait = 0;
+        for (const f of S.rfx) {
+          f.regla = decidir(f);
+          f.deLista = true;
+          // La lista viene aprobada por un coordinador, así que se preselecciona lo que
+          // trae. Las vetadas NO: ésas salen desmarcadas a propósito.
+          if (f.regla.d === 'stop') stop++;
+          else { S.sel.add(f.num); if (f.regla.d === 'go') go++; else wait++; }
+        }
+
+        log(`✓ ${S.rfx.length} de ${r.numeros.length} localizadas en Open Requests`,
+            res.noEstan.length ? 'w' : 'o');
+        if (res.noEstan.length) {
+          log(`⚠ ${res.noEstan.length} no aparecen en Open Requests (¿ya aceptadas, rechazadas o de otro sitio?):`, 'e');
+          for (const n of res.noEstan) log(`   · ${n.num} — ${n.motivo}`, 'e');
+        }
+        if (go || wait)
+          log(`Preseleccionadas ${go + wait}: ${go} respaldadas por el recetario, ${wait} sin regla conocida.`, 'w');
+        if (stop)
+          log(`⛔ ${stop} están VETADAS por regla de coordinador: salen desmarcadas y la herramienta `
+            + `NO las acepta aunque las marques. Si hay que aceptarlas, habladlo entre coordinadores.`, 'e');
+        log('Repasa la tabla. Nada se acepta sin que tú lo confirmes.', 'w');
+        repintar(); sincronizarBotones();
+      } catch (e) {
+        apuntarDiag('fallo leyendo la lista', M.diagnostico());
+        log('✗ ' + e.message, 'e');
+        $('qLog').disabled = false;
+      } finally {
+        S.buscando = false;
+        barra(0, 1);
+        sincronizarBotones();
+      }
+    }
+
     function abrirClasificar(r, veces) {
       const clave = claveDe(r);
       if (!clave) return;
@@ -1650,6 +2040,9 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
       const kGuardar = claveClasif(r);           // por importe, o por RFx si es ambiguo
       const yaClas = S.clasificaciones[kGuardar] || null;
       const yaCand = !!S.candidatas[clave];
+      // «Sacar de la automática» solo tiene sentido donde HAY automática que quitar.
+      const seAceptaSola = !!REGLAS.aceptar[clave];
+      const yaRet = !!S.retiradas[clave];
       const auto = servicioAutomatico(r);
       const dAuto = desgloseAutomatico(r);
       const d = desgloseDe(r);
@@ -1683,6 +2076,24 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
         <div style="font-size:.72em;color:#5a646e;margin-top:.7em">Desglose visto en la ficha (opcional)</div>
         <input type="text" class="axDlgCampo" id="dDesg" placeholder="p. ej. ER_015:2"
                value="${yaClas && yaClas.desglose ? yaClas.desglose : (dAuto && !dAuto.ambiguo ? dAuto.firma : '')}">
+        ${seAceptaSola ? `
+        <div class="axDlgPregunta">Hoy <b>${clave} se acepta sola</b> por regla de coordinador.
+          ¿Sacarla de la aceptación automática?</div>
+        <button type="button" id="dRet" class="axDlgTick" role="checkbox"
+                aria-checked="${yaRet ? 'true' : 'false'}">
+          <span class="ck${yaRet ? ' on' : ''}">${yaRet ? '&#10003;' : ''}</span>
+          <span>Sí, que pase a «revisar»</span></button>
+        <div style="font-size:.72em;color:#5a646e;margin-top:.5em">¿Por qué? (va en el aviso)</div>
+        <input type="text" class="axDlgCampo" id="dRetMot" placeholder="p. ej. el importe ya no corresponde a este alcance"
+               value="${yaRet && S.retiradas[clave].motivo ? String(S.retiradas[clave].motivo).replace(/"/g, '&quot;') : ''}">
+        <div style="font-size:.72em;color:#5a646e;margin-top:.5em">Tu nombre, para que sepan quién lo pide</div>
+        <input type="text" class="axDlgCampo" id="dQuien" placeholder="p. ej. Marta G."
+               value="${(S.gestor || '').replace(/"/g, '&quot;')}">
+        <div class="axDlgAyuda">Deja de marcarse sola <b>en tu ordenador y desde ya</b>, y afecta a
+          <b>todas las de ${opNombre} · ${importe} €</b>. Seguirás pudiendo aceptarlas a mano.
+          Para que el cambio llegue a los demás hay que pasarnos la aportación: la tabla vive
+          dentro del script y solo cambia publicando una versión nueva.</div>
+        ` : ''}
         <div class="axDlgPregunta">¿Proponerla además como
           <b>candidata a aceptación automática</b>?</div>
         <button type="button" id="dCand" class="axDlgTick" role="checkbox"
@@ -1692,9 +2103,11 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
         <div class="axDlgAyuda">Marcar esto <b>no acepta nada</b>: queda anotado para que
           lo aprueben los coordinadores.</div>
         <div class="axDlgPie">
-          ${(yaClas || yaCand) ? '<button class="b g" id="dBorrar">Quitar aportación</button>' : ''}
+          ${(yaClas || yaCand || yaRet) ? '<button class="b g" id="dBorrar">Quitar aportación</button>' : ''}
           <button class="b g" id="dCancelar">Cancelar</button>
-          <button class="b p" id="dGuardar">Guardar</button>
+          ${seAceptaSola ? '<button class="b g" id="dGuardarAviso">Guardar y copiar</button>'
+                          + '<button class="b p" id="dGuardarCorreo">Guardar y enviar aviso</button>' : ''}
+          <button class="b ${seAceptaSola ? 'g' : 'p'}" id="dGuardar">Guardar</button>
         </div></div>`;
 
       panel.appendChild(capa);
@@ -1711,27 +2124,50 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
       for (const b of q('dSrv').querySelectorAll('.ch'))
         b.onclick = () => { elegido = b.dataset.srv; refrescarChips(); };
 
-      // Casilla dibujada a mano: el estado vive en aria-checked, no en un input.
-      const tick = q('dCand');
-      const marcado = () => tick.getAttribute('aria-checked') === 'true';
-      tick.onclick = () => {
-        const nuevo = !marcado();
-        tick.setAttribute('aria-checked', String(nuevo));
-        const caja = tick.querySelector('.ck');
-        caja.className = 'ck' + (nuevo ? ' on' : '');
-        caja.innerHTML = nuevo ? '&#10003;' : '';
+      // Casillas dibujadas a mano: el estado vive en aria-checked, no en un input.
+      // (Los checkbox nativos los esconde el tema de OutSystems; esto ya nos pasó.)
+      const conmutar = el => {
+        const marcado = () => el.getAttribute('aria-checked') === 'true';
+        el.onclick = () => {
+          const nuevo = !marcado();
+          el.setAttribute('aria-checked', String(nuevo));
+          const caja = el.querySelector('.ck');
+          caja.className = 'ck' + (nuevo ? ' on' : '');
+          caja.innerHTML = nuevo ? '&#10003;' : '';
+        };
+        return marcado;
       };
+      const marcado = conmutar(q('dCand'));
+      const marcadoRet = q('dRet') ? conmutar(q('dRet')) : () => false;
+
+      // El botón del aviso solo tiene sentido si de verdad se está retirando algo.
+      // Apagado dice más que escondido: se ve que existe y por qué no se puede usar.
+      const sincronizarAviso = () => {
+        for (const [id, siMarcado] of [['dGuardarAviso', 'Guarda y te deja el aviso en el portapapeles'],
+                                       ['dGuardarCorreo', 'Guarda y abre tu correo con el aviso ya escrito']]) {
+          const b = q(id);
+          if (!b) continue;
+          b.disabled = !marcadoRet();
+          b.title = marcadoRet() ? siMarcado : 'Marca antes «Sí, que pase a revisar»';
+        }
+      };
+      if (q('dRet')) {
+        const alPulsar = q('dRet').onclick;
+        q('dRet').onclick = () => { alPulsar(); sincronizarAviso(); };
+      }
+      sincronizarAviso();
 
       const cerrar = () => capa.remove();
       capa.onclick = ev => { if (ev.target === capa) cerrar(); };
       q('dCancelar').onclick = cerrar;
       if (q('dBorrar')) q('dBorrar').onclick = () => {
-        delete S.clasificaciones[kGuardar]; delete S.candidatas[clave];
+        delete S.clasificaciones[kGuardar]; delete S.candidatas[clave]; delete S.retiradas[clave];
+        reevaluar(clave);
         guardarCandidatas(); cerrar(); repintar(); pintarCandidatas();
-        log(`Retirada la aportación sobre ${clave}.`);
+        log(`Retirada la aportación sobre ${clave}, y ${clave} vuelve a su decisión de fábrica.`);
       };
 
-      q('dGuardar').onclick = () => {
+      const guardar = async (conAviso) => {
         const desglose = q('dDesg').value.trim();
         const base = {
           clave,
@@ -1772,8 +2208,167 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
           log(`Retirada la candidata ${clave}.`);
         }
 
+        // Marcha atrás sobre la aceptación automática. Surte efecto ya, aquí, y además
+        // queda anotada para que llegue al script por la vía de las aportaciones.
+        if (seAceptaSola) {
+          const motivo = q('dRetMot') ? q('dRetMot').value.trim() : '';
+          if (q('dQuien')) S.gestor = q('dQuien').value.trim() || S.gestor;
+          if (marcadoRet()) {
+            S.retiradas[clave] = Object.assign({}, base, { motivo, retiradaEl: hoy(), reglaSrv: REGLAS.aceptar[clave].srv });
+            const c = reevaluar(clave);
+            log(`↩ ${clave} sale de la aceptación automática: pasa a «revisar»`
+              + (veces > 1 ? ` · afecta a ${veces} RFx de esta búsqueda` : '')
+              + (motivo ? ` · «${motivo}»` : '')
+              + (c.desmarcadas ? ` · ${c.desmarcadas} ${c.desmarcadas === 1 ? 'queda desmarcada' : 'quedan desmarcadas'}` : '')
+              + '. Seguirán pudiendo aceptarse a mano, marcándolas tú.', 'w');
+          } else if (S.retiradas[clave]) {
+            delete S.retiradas[clave];
+            const c = reevaluar(clave);
+            log(`↪ ${clave} vuelve a la aceptación automática`
+              + (c.marcadas ? ` · ${c.marcadas} vuelven a quedar marcadas` : '') + '.', 'o');
+          }
+        }
+
         guardarCandidatas(); cerrar(); repintar(); pintarCandidatas();
+
+        if (conAviso && S.retiradas[clave]) {
+          if (conAviso === 'correo') {
+            await redactarCorreo(S.retiradas[clave]);
+          } else {
+            const bien = await copiar(avisoRetirada(S.retiradas[clave]), D);
+            log(bien
+              ? `✓ Aviso de ${clave} copiado. Pégalo en el correo o el chat: lleva la línea exacta que hay que borrar del script.`
+              : '✗ No he podido copiar. Ábrelo en «Aportaciones» y descárgalo.', bien ? 'o' : 'e');
+          }
+        }
       };
+
+      q('dGuardar').onclick = () => guardar(null);
+      if (q('dGuardarAviso'))  q('dGuardarAviso').onclick  = () => guardar('copiar');
+      if (q('dGuardarCorreo')) q('dGuardarCorreo').onclick = () => guardar('correo');
+    }
+
+    // ── Aviso para quien mantiene el script ──────────────────────────────────────────
+    // La gracia está en la línea literal: Pepe no tiene que buscar nada ni interpretar
+    // nada, solo borrar exactamente eso. Y va con un bloque en JSON al final para que
+    // una herramienta pueda aplicarlo sola el día que la montemos.
+    function lineaDeRegla(clave) {
+      const r = REGLAS.aceptar[clave];
+      if (!r) return null;
+      return `      "${clave}": { firma: "${r.firma}", srv: "${r.srv}" },`;
+    }
+
+    // `breve` es la misma información con menos texto, para el cuerpo del correo: un
+    // mailto largo lo trunca Outlook sin avisar, y un aviso cortado a media línea es
+    // peor que no mandarlo. Un solo generador para las dos: la línea literal, que es lo
+    // que de verdad importa, sale del mismo sitio en ambos casos.
+    function avisoRetirada(cs, breve) {
+      const lista = Array.isArray(cs) ? cs : [cs];
+      const vivas = lista.filter(c => REGLAS.aceptar[c.clave]);
+      if (breve) {
+        const B = [];
+        B.push('Hola:');
+        B.push('');
+        if (!vivas.length) { B.push('No hay nada pendiente: esas reglas ya no están en el script.'); return B.join('\r\n'); }
+        B.push(`Hay que quitar ${vivas.length} ${vivas.length === 1 ? 'regla' : 'reglas'} de la aceptación`
+             + ` automática en aat_rfx.user.js (visto con la v${VERSION}).`);
+        B.push('');
+        for (const c of vivas) {
+          B.push(`${c.clave} — ${c.operador} · ${c.importe} €`);
+          B.push(`Motivo: ${c.motivo || '(no indicado)'}`);
+          B.push(`Visto en: RFx ${c.ejemplo}${c.proyecto ? ' (' + c.proyecto + ')' : ''}`
+               + `${c.veces > 1 ? ', ' + c.veces + ' RFx en esa búsqueda' : ''}`);
+          B.push('');
+          B.push('Línea a borrar en REGLAS -> aceptar:');
+          B.push(lineaDeRegla(c.clave).trim());
+          B.push('');
+        }
+        B.push('No tocar no_aceptar. Subir @version y VERSION. Pasar node test_release.js.');
+        B.push('');
+        B.push(S.gestor || '');
+        return B.join('\r\n');
+      }
+      const L = [];
+      L.push('AAT · Gestionar RFx — RETIRAR DE LA ACEPTACIÓN AUTOMÁTICA');
+      L.push(`Lo pide : ${S.gestor || '(sin nombre)'}`);
+      L.push(`Fecha   : ${hoy()}`);
+      L.push(`Script  : v${VERSION}`);
+      L.push('');
+      if (!vivas.length) {
+        L.push('No hay nada pendiente: las retiradas que tenía ya no están en el script.');
+        return L.join('\r\n');
+      }
+      L.push(vivas.length === 1
+        ? 'Hay 1 regla que hoy acepta sola y no debería:'
+        : `Hay ${vivas.length} reglas que hoy aceptan solas y no deberían:`);
+      L.push('');
+      for (const c of vivas) {
+        L.push(`  ${c.clave}   ${c.operador} · ${c.importe} €`);
+        L.push(`     motivo  : ${c.motivo || '(no lo dijo)'}`);
+        L.push(`     visto en: RFx ${c.ejemplo}${c.proyecto ? ' (' + c.proyecto + ')' : ''}`
+             + `${c.veces > 1 ? ' · ' + c.veces + ' RFx en esa búsqueda' : ''}`);
+        L.push('');
+      }
+      L.push('QUÉ HAY QUE HACER EN aat_rfx.user.js');
+      L.push('');
+      L.push(`  1. En «const REGLAS = {` + `» → «aceptar:», borrar ${vivas.length === 1 ? 'esta línea' : 'estas líneas'}:`);
+      L.push('');
+      for (const c of vivas) L.push(lineaDeRegla(c.clave));
+      L.push('');
+      L.push('  2. NO tocar «no_aceptar»: ésas son los vetos de los coordinadores.');
+      L.push('  3. No hace falta tocar RECETAS: el servicio se sigue sabiendo por ahí.');
+      L.push('  4. Subir LAS DOS versiones: «// @version» y «const VERSION».');
+      L.push('  5. Ejecutar «node test_release.js» antes de publicar.');
+      L.push('');
+      L.push('--- AAT-APORTACION v1 · no borres esto, lo lee la herramienta ---');
+      L.push(JSON.stringify({
+        tipo: 'retiradas', version: VERSION, gestor: S.gestor || '', fecha: hoy(),
+        claves: vivas.map(c => ({ clave: c.clave, motivo: c.motivo || '', ejemplo: c.ejemplo,
+                                  veces: c.veces, linea: lineaDeRegla(c.clave).trim() }))
+      }));
+      L.push('--- fin ---');
+      return L.join('\r\n');
+    }
+
+    // Abre el correo del gestor con el aviso ya redactado. Se hace con un <a> temporal
+    // y NO cambiando location: el panel puede estar en una ventana aparte, y navegar
+    // ahí lo mataría. Si el mailto sale demasiado largo, Outlook lo corta en silencio,
+    // así que en ese caso ni se intenta: se copia y se dice.
+    const TOPE_MAILTO = 1900;
+    async function redactarCorreo(cs) {
+      const lista = (Array.isArray(cs) ? cs : [cs]).filter(c => REGLAS.aceptar[c.clave]);
+      if (!lista.length) {
+        log('No hay nada pendiente que avisar: esas reglas ya no están en el script.', 'w');
+        return;
+      }
+      const asunto = lista.length === 1
+        ? `AAT · Retirar de la aceptación automática: ${lista[0].clave}`
+        : `AAT · Retirar ${lista.length} reglas de la aceptación automática`;
+      const cuerpo = avisoRetirada(lista, true);
+      const destino = S.correoMant || CORREO_MANTENIMIENTO || '';
+      const url = `mailto:${encodeURIComponent(destino)}`
+        + `?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+
+      if (url.length > TOPE_MAILTO) {
+        const bien = await copiar(avisoRetirada(lista), D);
+        log(`El aviso es largo (${lista.length} reglas) y el correo lo cortaría a medias. `
+          + (bien ? 'Te lo he copiado entero: pégalo en un correo nuevo.'
+                  : 'No he podido copiarlo; usa «Descargar .txt» en Aportaciones.'), bien ? 'w' : 'e');
+        return;
+      }
+      try {
+        const a = D.createElement('a');
+        a.href = url;
+        a.style.display = 'none';
+        D.body.appendChild(a);
+        a.click();
+        setTimeout(() => { try { a.remove(); } catch (e) {} }, 2000);
+        log('✉ Correo abierto con el aviso ya escrito. Repásalo y envíalo.'
+          + (destino ? '' : ' Ponle tú el destinatario: no hay ninguno configurado.'), 'o');
+      } catch (e) {
+        const bien = await copiar(avisoRetirada(lista), D);
+        log('No he podido abrir el correo. ' + (bien ? 'Te he copiado el aviso.' : ''), 'w');
+      }
     }
 
     function textoCandidatas() {
@@ -1813,6 +2408,24 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
         L.push(`    propuesta: ${c.fecha}`);
         L.push('');
       }
+      L.push('== RETIRADAS DE LA ACEPTACIÓN AUTOMÁTICA ================');
+      L.push('El gestor ha dado marcha atrás: hoy el script las acepta solas y él dice');
+      L.push('que no debería. En SU panel ya pasan a «revisar». Para que valga para');
+      L.push('todos hay que quitar la regla del script y publicar versión nueva.');
+      L.push('');
+      const rets = Object.values(S.retiradas);
+      if (!rets.length) L.push('(ninguna)');
+      for (const c of rets) {
+        const viva = !!REGLAS.aceptar[c.clave];
+        L.push(`${c.clave}   ${c.operador} · ${c.importe} €`);
+        L.push(`    motivo   : ${c.motivo || '(no lo dijo)'}`);
+        L.push(`    regla    : ${viva ? 'SIGUE ACTIVA en el script — hay que quitarla'
+                                      : 'ya no está en el script: esta retirada sobra'}`);
+        L.push(`    servicio : ${c.reglaSrv || '-'}`);
+        L.push(`    veces    : ${c.veces}   ejemplo: ${c.ejemplo}${c.proyecto ? ' (' + c.proyecto + ')' : ''}`);
+        L.push(`    retirada : ${c.retiradaEl || c.fecha}`);
+        L.push('');
+      }
       return L.join('\r\n');
     }
 
@@ -1820,11 +2433,12 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
       const caja = $('qCandBox');
       const clas  = Object.values(S.clasificaciones).sort((a, b) => b.veces - a.veces);
       const apar  = Object.values(S.apartadas || {});
+      const rets  = Object.values(S.retiradas || {});
       const filas = Object.values(S.candidatas).sort((a, b) => b.veces - a.veces);
       $('qCand').textContent = `Aportaciones${nAportes() ? ' (' + nAportes() + ')' : ''}`;
       if (caja.classList.contains('oculto')) return;
 
-      if (!clas.length && !filas.length && !apar.length) {
+      if (!clas.length && !filas.length && !apar.length && !rets.length) {
         caja.innerHTML = '<h4>Tus aportaciones</h4>'
           + '<div style="color:#8a949e">Todavía no hay ninguna. En las RFx que ponen «revisar», '
           + 'pulsa «clasificar» para decir de qué servicio son.</div>'
@@ -1845,6 +2459,16 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
             </tr>`).join('')}</tbody></table>` : '';
 
         caja.innerHTML = '<h4>Tus aportaciones</h4>'
+          + `<div style="font-size:.78em;color:#5a646e;margin:-.2em 0 .6em">
+              Tu nombre, para que quien mantiene el script sepa a quién preguntar:
+              <input type="text" id="qQuien" placeholder="p. ej. Marta G." autocomplete="off"
+                value="${(S.gestor || '').replace(/"/g, '&quot;')}"
+                style="padding:.2em .4em;border:1px solid #c6ccd3;border-radius:4px;font:inherit;width:11em">
+              ${rets.length ? `&nbsp;&nbsp;Enviar los avisos a:
+              <input type="text" id="qCorreoMant" placeholder="correo de quien mantiene el script" autocomplete="off"
+                value="${(S.correoMant || CORREO_MANTENIMIENTO || '').replace(/"/g, '&quot;')}"
+                style="padding:.2em .4em;border:1px solid #c6ccd3;border-radius:4px;font:inherit;width:15em">` : ''}
+            </div>`
           + tabla('Clasificaciones de servicio',
                   'Hechos que has comprobado en la ficha. <b>Ya están actuando en tu panel</b> y se incorporarán al recetario del script.',
                   clas, 'Servicio')
@@ -1863,8 +2487,27 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
           + tabla('Candidatas a aceptación automática',
                   'Propuestas, no reglas: <b>no se acepta nada por estar aquí</b>. Tienen que aprobarlas los coordinadores.',
                   filas, 'Desglose')
-          + `<div style="margin-top:.6em;display:flex;gap:.4em;flex-wrap:wrap">
-            <button class="b p" id="qCandCopiar">Copiar al portapapeles</button>
+          + (rets.length ? `
+            <h4 style="margin-top:.8em">Retiradas de la aceptación automática (${rets.length})</h4>
+            <div style="font-size:.78em;color:#5a646e;margin-bottom:.4em">
+              Marcha atrás sobre reglas que hoy aceptan solas. <b>Ya están actuando en tu panel</b>:
+              esas RFx pasan a «revisar» y puedes aceptarlas a mano. Para que valga para todos hay
+              que quitar la regla del script y publicar versión nueva, así que <b>pásanos esto</b>.</div>
+            <table><thead><tr><th>Clave</th><th>Operador</th><th>Importe</th><th>Motivo</th><th>Regla</th><th></th></tr></thead>
+            <tbody>${rets.map(c => `<tr>
+              <td class="num">${c.clave}</td><td>${c.operador}</td><td class="num">${c.importe} €</td>
+              <td style="font-size:.85em">${c.motivo ? String(c.motivo).replace(/</g, '&lt;') : '<span style="color:#b0b8c0">sin motivo</span>'}</td>
+              <td style="font-size:.85em">${REGLAS.aceptar[c.clave]
+                    ? '<b style="color:#7a4b00">sigue en el script</b>'
+                    : '<span style="color:#8a949e">ya recogida: esto sobra</span>'}</td>
+              <td><button class="quita" type="button" data-correo="${c.clave}">correo</button>
+                  <button class="quita" type="button" data-aviso="${c.clave}">copiar</button>
+                  <button class="quita" type="button" data-quita="${c.clave}" data-tipo="ret">quitar</button></td>
+            </tr>`).join('')}</tbody></table>` : '')
+          + `<div style="margin-top:.6em;display:flex;gap:.4em;flex-wrap:wrap;align-items:center">
+            ${rets.length ? '<button class="b p" id="qRetCorreo">Enviar aviso por correo</button>'
+                           + '<button class="b g" id="qRetAviso">Copiar aviso</button>' : ''}
+            <button class="b g" id="qCandCopiar">Copiar todas las aportaciones</button>
             <button class="b g" id="qCandBajar">Descargar .txt</button>
             <button class="b g" id="qCandVaciar">Vaciar todo</button>
             <button class="b g" id="qCandCerrar">Cerrar</button>
@@ -1873,20 +2516,54 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
 
       const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
       on('qCandCerrar', () => { caja.classList.add('oculto'); });
+
+      const campoQuien = $('qQuien');
+      if (campoQuien) campoQuien.oninput = () => { S.gestor = campoQuien.value.trim(); guardarCandidatas(); };
+      const campoCorreo = $('qCorreoMant');
+      if (campoCorreo) campoCorreo.oninput = () => { S.correoMant = campoCorreo.value.trim(); guardarCandidatas(); };
+
+      on('qRetCorreo', () => redactarCorreo(rets));
+      on('qRetAviso', async () => {
+        const texto = avisoRetirada(rets);
+        const bien = await copiar(texto, D);
+        log(bien
+          ? '✓ Aviso copiado. Pégalo tal cual en el correo o el chat: lleva la línea exacta que hay que borrar.'
+          : '✗ No he podido copiar. Usa «Descargar .txt».', bien ? 'o' : 'e');
+        if (bien && !S.gestor)
+          log('  Ponle tu nombre arriba y vuelve a copiarlo, para que Pepe sepa quién lo pide.', 'w');
+      });
+
+      for (const b of caja.querySelectorAll('[data-correo]'))
+        b.onclick = () => { const c = S.retiradas[b.dataset.correo]; if (c) redactarCorreo(c); };
+
+      for (const b of caja.querySelectorAll('[data-aviso]'))
+        b.onclick = async () => {
+          const c = S.retiradas[b.dataset.aviso];
+          if (!c) return;
+          const bien = await copiar(avisoRetirada(c), D);
+          log(bien ? `✓ Aviso de ${c.clave} copiado, listo para enviárselo a Pepe.`
+                   : '✗ No he podido copiar.', bien ? 'o' : 'e');
+        };
       on('qCandCopiar', async () => {
         const bien = await copiar(textoCandidatas(), D);
         log(bien ? '✓ Aportaciones copiadas al portapapeles.' : '✗ No he podido copiar.', bien ? 'o' : 'e');
       });
       on('qCandBajar', () => descargar(textoCandidatas(), `aportaciones_rfx_${hoy()}.txt`, D));
       on('qCandVaciar', () => {
-        if (!V.confirm('¿Vaciar todas tus aportaciones? Se pierden las clasificaciones y las candidatas guardadas.')) return;
-        S.candidatas = {}; S.clasificaciones = {}; S.apartadas = {}; guardarCandidatas(); pintarCandidatas(); repintar();
+        if (!V.confirm('¿Vaciar todas tus aportaciones?\n\nSe pierden las clasificaciones, las candidatas '
+          + 'y las retiradas de la aceptación automática. Los importes que hubieras sacado de la automática '
+          + 'volverán a aceptarse solos.')) return;
+        S.candidatas = {}; S.clasificaciones = {}; S.apartadas = {}; S.retiradas = {};
+        reevaluar(null);
+        guardarCandidatas(); pintarCandidatas(); repintar();
       });
       for (const b of caja.querySelectorAll('[data-quita]'))
         b.onclick = () => {
           if (b.dataset.tipo === 'clas') delete S.clasificaciones[b.dataset.quita];
           else if (b.dataset.tipo === 'apar') delete S.apartadas[b.dataset.quita];
+          else if (b.dataset.tipo === 'ret')  delete S.retiradas[b.dataset.quita];
           else delete S.candidatas[b.dataset.quita];
+          if (b.dataset.tipo === 'ret') reevaluar(b.dataset.quita);
           guardarCandidatas(); pintarCandidatas(); repintar();
         };
     }
@@ -1978,20 +2655,43 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
       if (enVentana) { try { V.close(); } catch (e) {} }
     };
 
+    // El interruptor de fechas: al encenderlo, los dos campos se apagan para que quede
+    // claro que no pintan nada. No es un <input type=checkbox> a propósito: el tema de
+    // OutSystems los esconde y ya nos costó un rato descubrirlo la otra vez.
+    const sinFechas = () => $('qSinFechas').getAttribute('aria-pressed') === 'true';
+    $('qSinFechas').onclick = () => {
+      const nuevo = !sinFechas();
+      $('qSinFechas').setAttribute('aria-pressed', String(nuevo));
+      $('qD').disabled = nuevo; $('qH').disabled = nuevo;
+    };
+
     $('qBuscar').onclick = async () => {
-      const desde = $('qD').value.trim(), hasta = $('qH').value.trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta))
+      const todas = sinFechas();
+      let desde = $('qD').value.trim(), hasta = $('qH').value.trim();
+      if (todas) {
+        // Un rango absurdamente ancho equivale a «sin fechas» y reaprovecha el troceado
+        // por mitades, que está rodado. Escribir un barrido nuevo sin fechas sería
+        // código nuevo sin probar justo en el sitio donde menos conviene.
+        desde = '2015-01-01'; hasta = hoy();
+      } else if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) {
         return log('✗ Formato de fecha incorrecto (YYYY-MM-DD).', 'e');
+      }
+
+      if (todas && !V.confirm(
+        'Vas a barrer TODAS las pendientes, sin filtro de fecha.\n\n'
+        + 'En la última comprobación eran unas 990 RFx (33 páginas) y tarda un par de '
+        + 'minutos.\n\nSi lo que quieres es lo de estos días, cancela y usa el rango.\n\n¿Seguimos?'))
+        return;
 
       S.buscando = true; S.abortar = false;
       sincronizarBotones();
       reiniciarLog('▶ Buscando pendientes…');
       try {
         S.rango = { desde, hasta };
-        log(`Rango de creación ${desde} → ${hasta}`);
+        log(todas ? 'Sin filtro de fechas: todas las pendientes.' : `Rango de creación ${desde} → ${hasta}`);
         const r = await M.recogerPorTramos(desde, hasta, log, apuntarDiag);
         S.rfx = r.filas; S.sel.clear(); S.res = [];
-        S.filtro = { op: '', srv: '', txt: '' };
+        S.filtro = { op: '', srv: '', txt: '', sel: '' };
         try { $('qFTxt').value = ''; } catch (e) {}
 
         let go = 0, stop = 0, wait = 0;
@@ -2006,7 +2706,7 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
           log('⚠ La lista está INCOMPLETA. No aceptes con esto sin repetir la búsqueda:', 'e');
           for (const a of r.avisos) log('   · ' + a, 'e');
         }
-        if (go) log('Revisa la preselección antes de aceptar. Nada se acepta sin tu confirmación.', 'w');
+        if (go) log('Ahora acota por operador o servicio si quieres, y revisa antes de aceptar.', 'w');
         repintar();
         sincronizarBotones();
       } catch (e) {
@@ -2020,14 +2720,40 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
       }
     };
 
+    $('qPegar').onclick = () => abrirPegarLista();
+
+    // El único sitio donde «elegir» toca la selección, y porque lo pides tú a mano.
+    // Respeta la regla: no marca vetadas ni las que están a revisar.
+    $('qSoloVisible').onclick = () => {
+      const aLaVista = visibles();
+      const marcables = aLaVista.filter(r => (r.regla || {}).d === 'go');
+      const antes = S.sel.size;
+      S.sel = new Set(marcables.map(r => r.num));
+      log(`Marcadas ${S.sel.size} de las ${aLaVista.length} que estás viendo `
+        + `(antes había ${antes} marcadas en total). Las vetadas y las de revisar no se marcan solas.`, 'w');
+      repintar();
+    };
+
     $('qFTxt').oninput = () => { S.filtro.txt = $('qFTxt').value; repintar(); };
     $('qFLimpiar').onclick = () => {
-      S.filtro = { op: '', srv: '', txt: '' };
+      S.filtro = { op: '', srv: '', txt: '', sel: '' };
       $('qFTxt').value = '';
       repintar();
     };
 
-    $('qCand').onclick = () => { $('qCandBox').classList.toggle('oculto'); pintarCandidatas(); };
+    // La caja de aportaciones está ARRIBA del listado y dentro del mismo contenedor que
+    // hace scroll. Si estabas a media tabla, se abría fuera de la vista y parecía que el
+    // botón no hacía nada. Al abrirla se sube; al cerrarla NO se toca el scroll, para no
+    // perderte la fila que estabas mirando.
+    $('qCand').onclick = () => {
+      const caja = $('qCandBox');
+      caja.classList.toggle('oculto');
+      pintarCandidatas();
+      if (caja.classList.contains('oculto')) return;
+      const wrap = caja.parentElement;
+      try { wrap.scrollTo({ top: 0, behavior: 'smooth' }); }
+      catch (e) { wrap.scrollTop = 0; }
+    };
 
     $('qNone').onclick = () => { S.sel.clear(); repintar(); };
     $('qSim').onclick = () => ejecutar(true);
@@ -2130,7 +2856,7 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
       log('Registro descargado.');
     };
 
-    return { D, panel, fondo, estilo, pintar, escribir, limpiar, log, enVentana };
+    return { D, panel, fondo, estilo, pintar, escribir, limpiar, log, enVentana, avisoRetirada };
   }
 
   // ═══ ARRANQUE ═════════════════════════════════════════════════════════════════════
@@ -2309,6 +3035,6 @@ html.aat-ventana,body.aat-ventana{margin:0!important;padding:0!important;height:
 
   // Se exponen también las funciones puras: sirven para depurar desde la consola
   // sin tener que abrir el panel (p. ej. __AAT_RFX.decidir({ref,valor})).
-  window.__AAT_RFX = { abrir, M, S, VERSION, MODO_PANEL, decidir, proyectoDe, importeDe, operadorDe,
+  window.__AAT_RFX = { abrir, M, S, VERSION, MODO_PANEL, decidir, aviso: (...a) => ui && ui.avisoRetirada(...a), parsearLista, pasaFiltro, visibles, servicioDe, REGLAS, proyectoDe, importeDe, operadorDe,
                        get ui() { return ui; }, get ventana() { return ventana; } };
 })();
